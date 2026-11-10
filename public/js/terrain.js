@@ -65,6 +65,8 @@ export class Terrain {
         vec4 wp = instanceMatrix * vec4(transformed, 1.0);
         float sway = (sin(time * 1.7 + wp.x * 0.35 + wp.z * 0.2) * 0.6 + sin(time * 3.1 + wp.x * 0.9) * 0.25) * transformed.y * 0.22;
         transformed.x += sway; transformed.z += sway * 0.6;`);
+      // cards are lit as if they were the ground (no back-face normal flip, which turned them black)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n normal = normalize(vNormal);');
     };
     const mesh = new THREE.InstancedMesh(geo, mat, count);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), col = new THREE.Color();

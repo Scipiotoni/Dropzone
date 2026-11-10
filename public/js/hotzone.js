@@ -17,8 +17,8 @@ export const DROP_ZONES = [
   { id: 'gas', name: 'Route 9 Station', pos: [-80, 100], danger: 1, desc: 'Roadside gas station on the highway.' },
 ];
 export const EXTRACTS = [
-  { id: 'north', name: 'North Relay LZ', pos: [-10, -262] }, { id: 'east', name: 'East Docks LZ', pos: [262, 70] },
-  { id: 'west', name: 'West Pass LZ', pos: [-262, 10] }, { id: 'south', name: 'Silo Field LZ', pos: [-40, 262] },
+  { id: 'north', name: 'North Relay LZ', pos: [-10, -232] }, { id: 'east', name: 'East Docks LZ', pos: [234, 70] },
+  { id: 'west', name: 'West Pass LZ', pos: [-234, 10] }, { id: 'south', name: 'Silo Field LZ', pos: [-40, 234] },
 ];
 const ROADS = [
   [[-60, -320], [-52, -150], [-40, 0], [-55, 150], [-70, 320]],
@@ -27,7 +27,7 @@ const ROADS = [
   [[-55, 150], [-120, 160], [-200, 150]],
   [[-52, -150], [-120, -162], [-178, -160]],
   [[160, 30], [168, 110], [160, 150]],
-  [[-40, 20], [-160, 15], [-262, 10]], [[-55, 150], [-45, 262]], [[-52, -150], [-10, -262]], [[160, 30], [262, 70]],
+  [[-40, 20], [-160, 15], [-234, 10]], [[-55, 150], [-42, 234]], [[-52, -150], [-10, -232]], [[160, 30], [234, 70]],
 ];
 
 function segDist(px, pz, a, b) { const dx = b[0] - a[0], dz = b[1] - a[1]; const t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (pz - a[1]) * dz) / (dx * dx + dz * dz))); const x = a[0] + dx * t, z = a[1] + dz * t; return [Math.hypot(px - x, pz - z), x, z]; }

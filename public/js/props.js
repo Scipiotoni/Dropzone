@@ -83,8 +83,17 @@ export function apartment(W, x, y, z, yaw, rand, floors = 3) {
     wallWithHoles(S, D - T, wallH, T, mat, -L / 2 + T / 2, y0, 0, -Math.PI / 2, sideHoles);
     if (!(last && ruinTop)) wallWithHoles(S, D - T, wallH, T, mat, L / 2 - T / 2, y0, 0, Math.PI / 2, sideHoles);
     else { S.box(T, FH * 0.3, D * 0.5, mat, L / 2 - T / 2, y0, -D / 4); }
-    // window frames & sills (detail)
-    for (const h of frontHoles) if (h.y0 > 0) { S.part(boxGeo(1.6, 0.08, 0.45), M.concrete, h.x0 + 0.7 - L / 2, y0 + 0.86, -D / 2 - 0.05); }
+    // window frames & sills, balconies, AC units (detail)
+    for (const [i, h] of frontHoles.entries()) if (h.y0 > 0) {
+      const cx = h.x0 + 0.7 - L / 2;
+      S.part(boxGeo(1.6, 0.08, 0.45), M.concrete, cx, y0 + 0.86, -D / 2 - 0.05);
+      S.part(boxGeo(1.56, 0.12, 0.34), M.concreteDark, cx, y0 + 2.36, -D / 2 - 0.02);
+      for (const sx of [-1, 1]) S.part(boxGeo(0.08, 1.44, 0.1), M.concreteDark, cx + sx * 0.74, y0 + 1.6, -D / 2 - 0.05);
+      if (f > 0 && (i + f) % 3 === 0 && !(last && ruinTop)) { S.part(boxGeo(2.2, 0.16, 1.1), M.concrete, cx, y0 - 0.02, -D / 2 - 0.55); S.part(boxGeo(2.2, 0.9, 0.05), M.rust, cx, y0 + 0.5, -D / 2 - 1.08); for (const sx of [-1, 1]) S.part(boxGeo(0.05, 0.9, 1.0), M.rust, cx + sx * 1.08, y0 + 0.5, -D / 2 - 0.58); }
+      else if ((i * 7 + f) % 4 === 1) { S.part(boxGeo(0.8, 0.5, 0.45), M.white, cx + 0.3, y0 + 0.5, -D / 2 - 0.3); S.part(cylGeo(0.18, 0.18, 0.02, 12).rotateX(Math.PI / 2), M.steel, cx + 0.3, y0 + 0.5, -D / 2 - 0.53); }
+    }
+    if (f === 0) { S.part(boxGeo(3.6, 0.7, 0.12), [M.red, M.blue, M.yellow][Math.floor(rand() * 3)], L / 2 - 3.2, 2.9, -D / 2 - 0.12); S.part(boxGeo(3.0, 0.08, 1.2), M.steel, 0, 2.55, -D / 2 - 0.6); }
+    for (const sx of [-1, 1]) S.part(cylGeo(0.07, 0.07, FH, 8), M.steel, sx * (L / 2 - 0.25), y0 + FH / 2, -D / 2 - 0.12);
     // interior partition wall with doorway
     wallWithHoles(S, D * 0.55, FH - 0.1, 0.15, M.plaster, 1.5, y0, -D / 2 + D * 0.275 + 0.15, Math.PI / 2, [{ x0: 2.0, x1: 3.0, y0: 0, y1: 2.2 }]);
     // floor slab above (with stairwell hole on the +x side)
@@ -423,6 +432,7 @@ function fenceMat() { // chain-link: alpha-tested diamond wire pattern
 export function makeTrees(W, spots, rand) {
   const M = worldMats();
   const leafMat = new THREE.MeshStandardMaterial({ map: TEX.leaves.map, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9, color: 0x9aa070 });
+  leafMat.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n normal = normalize(mix(vNormal, (viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz, 0.6));'); };
   const variants = [];
   for (let v = 0; v < 4; v++) {
     const dead = v === 3; const parts = { bark: [], leaf: [] };

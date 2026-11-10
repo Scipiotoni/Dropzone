@@ -93,20 +93,20 @@ const LIB = {};
 const def = (name, fn) => { Object.defineProperty(LIB, name, { get() { const v = fn(); Object.defineProperty(LIB, name, { value: v }); return v; }, configurable: true }); };
 export const TEX = LIB;
 
-def('grass', () => { const f = fbm(11, 4, 6), g = fbm(12, 32, 3), w = worley(13, 24);
+def('grass', () => { const f = fbm(11, 4, 6), g = fbm(12, 32, 3), w = worley(13, 24), bl = fbm(14, 128, 3), bl2 = worley(15, 90);
   return bake(512, (u, v) => { const n = f(u, v), b = g(u, v), [d1] = w(u, v); const dry = smooth(0.45, 0.7, n);
-    const blade = Math.sin((u * 220 + b * 9) + v * 40) * 0.5 + 0.5;
-    let c = lerp3(hex(0x4a5a2a), hex(0x8a8a4a), dry); c = lerp3(c, hex(0x3a3a24), smooth(0.2, 0.0, d1) * 0.6);
-    c = c.map((k) => k * (0.78 + blade * 0.3 + b * 0.15));
-    return { h: blade * 0.3 + b * 0.6 + n * 0.4, c, r: 0.92 - blade * 0.08 }; }, 1.6); });
+    const [e1, e2] = bl2(u, v); const blade = smooth(0.35, 0.75, bl(u, v)) * 0.6 + smooth(0.0, 0.25, e2 - e1) * 0.4;
+    let c = lerp3(hex(0x45552a), hex(0x8a8648), dry); c = lerp3(c, hex(0x3a3a24), smooth(0.2, 0.0, d1) * 0.5);
+    c = c.map((k) => k * (0.72 + blade * 0.4 + b * 0.12));
+    return { h: blade * 0.5 + b * 0.4 + n * 0.3, c, r: 0.94 - blade * 0.06 }; }, 1.4); });
 def('dirt', () => { const f = fbm(21, 4, 6), w = worley(22, 18), g = fbm(23, 64, 2);
   return bake(512, (u, v) => { const n = f(u, v), [d1, d2] = w(u, v), peb = smooth(0.35, 0.15, d1) * smooth(0.5, 0.75, g(u, v));
     let c = lerp3(hex(0x5a4632), hex(0x8a7154), n); c = lerp3(c, hex(0x857a6a), peb * 0.5);
     c = c.map((k) => k * (0.85 + g(u, v) * 0.3));
     return { h: n * 0.6 + peb * 0.8 + (d2 - d1) * 0.1, c, r: 0.95 - peb * 0.2 }; }, 2.5); });
-def('rock', () => { const f = fbm(31, 3, 7), cr = worley(32, 6), g = fbm(33, 48, 3);
-  return bake(512, (u, v) => { const n = f(u, v), [d1, d2] = cr(u, v), crack = smooth(0.06, 0.0, d2 - d1), s = g(u, v);
-    let c = lerp3(hex(0x5c5a55), hex(0x9c978c), n); c = lerp3(c, hex(0x6b5a44), smooth(0.55, 0.8, s) * 0.4); c = c.map((k) => k * (1 - crack * 0.55) * (0.85 + s * 0.25));
+def('rock', () => { const f = fbm(31, 3, 7), cr = worley(32, 12), g = fbm(33, 48, 3), w2 = fbm(34, 6, 5);
+  return bake(512, (u, v) => { const n = f(u, v), [d1, d2] = cr(u + w2(u, v) * 0.08, v + w2(v, u) * 0.08), crack = smooth(0.05, 0.0, d2 - d1) * smooth(0.35, 0.6, w2(u, v)), s = g(u, v);
+    let c = lerp3(hex(0x5c5a55), hex(0x9c978c), n); c = lerp3(c, hex(0x6b5a44), smooth(0.55, 0.8, s) * 0.4); c = c.map((k) => k * (1 - crack * 0.4) * (0.85 + s * 0.25));
     const lich = smooth(0.62, 0.72, f(u * 0.5 + 0.3, v)); c = lerp3(c, hex(0x7a8050), lich * 0.35);
     return { h: n * 1.2 - crack * 0.6 + s * 0.2, c, r: 0.85 + crack * 0.1 }; }, 4); });
 def('asphalt', () => { const f = fbm(41, 4, 5), w = worley(42, 40), cr = worley(43, 5), g = fbm(44, 128, 2);
@@ -198,21 +198,22 @@ def('metalPlate', () => { const g = fbm(241, 128, 2), f = fbm(242, 4, 5), rs = f
     let c = hex(0x6a6c6e).map((k) => k * (0.8 + g(u, v) * 0.3 + bump * 0.15)); c = lerp3(c, hex(0x7a4020), rust * 0.8);
     return { h: bump + g(u, v) * 0.1, c, r: lerp(0.4, 0.9, rust) - bump * 0.1, m: lerp(0.9, 0.2, rust) }; }, 2); });
 def('machine', () => { const g = fbm(251, 128, 2), f = fbm(252, 8, 5), rs = fbm(253, 6, 5); // weathered industrial robot plating
-  return bake(512, (u, v) => { const panel = ((u * 4) % 1 < 0.01 || (v * 4) % 1 < 0.01) ? 1 : 0, scuff = smooth(0.6, 0.75, f(u, v)), soot = smooth(0.5, 0.8, rs(u, v));
-    let c = hex(0xb8b2a0).map((k) => k * (0.85 + g(u, v) * 0.2)); c = lerp3(c, hex(0x5a5a58), scuff * 0.7); c = lerp3(c, hex(0x2a2622), soot * 0.5 + panel * 0.6);
+  return bake(512, (u, v) => { const panel = ((u * 4) % 1 < 0.01 || (v * 4) % 1 < 0.01) ? 1 : 0, scuff = smooth(0.68, 0.78, f(u, v)), soot = smooth(0.55, 0.85, rs(u, v));
+    let c = hex(0xb8b2a0).map((k) => k * (0.85 + g(u, v) * 0.2)); c = lerp3(c, hex(0x7a7a76), scuff * 0.5); c = lerp3(c, hex(0x2a2622), soot * 0.22 + panel * 0.6);
     return { h: -panel * 0.8 + g(u, v) * 0.15, c, r: lerp(0.5, 0.75, soot) - scuff * 0.1, m: lerp(0.4, 0.85, scuff) }; }, 2); });
 // alpha-cutout foliage & grass cards
 def('leaves', () => { const R = rng(261); const C = document.createElement('canvas'); C.width = C.height = 512; const x = C.getContext('2d');
   for (let i = 0; i < 420; i++) { const px = 40 + R() * 432, py = 40 + R() * 432, a = R() * Math.PI * 2, s = 10 + R() * 16, g = 70 + R() * 70;
     x.save(); x.translate(px, py); x.rotate(a); x.fillStyle = `rgb(${g * 0.55 + R() * 30 | 0},${g | 0},${g * 0.35 | 0})`;
     x.beginPath(); x.ellipse(0, 0, s * 0.42, s, 0, 0, Math.PI * 2); x.fill(); x.strokeStyle = 'rgba(30,40,10,0.5)'; x.lineWidth = 1; x.beginPath(); x.moveTo(0, -s); x.lineTo(0, s); x.stroke(); x.restore(); }
-  const t = new THREE.CanvasTexture(C); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = ANISO; return { map: t }; });
+  bleed(C, [70, 92, 40]); const t = new THREE.CanvasTexture(C); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = ANISO; return { map: t }; });
 def('grassCard', () => { const R = rng(271); const C = document.createElement('canvas'); C.width = 256; C.height = 256; const x = C.getContext('2d');
   for (let i = 0; i < 70; i++) { const bx = 10 + R() * 236, h = 120 + R() * 130, lean = (R() - 0.5) * 60, w = 3 + R() * 4, dry = R();
     const grd = x.createLinearGradient(0, 256, 0, 256 - h); grd.addColorStop(0, '#2e3a18'); grd.addColorStop(1, dry > 0.6 ? '#b0a060' : '#7a8a3c');
     x.fillStyle = grd; x.beginPath(); x.moveTo(bx - w, 256); x.quadraticCurveTo(bx + lean * 0.3, 256 - h * 0.6, bx + lean, 256 - h); x.quadraticCurveTo(bx + lean * 0.3 + w * 0.3, 256 - h * 0.6, bx + w, 256); x.fill(); }
-  const t = new THREE.CanvasTexture(C); t.colorSpace = THREE.SRGBColorSpace; return { map: t }; });
+  bleed(C, [92, 104, 50]); const t = new THREE.CanvasTexture(C); t.colorSpace = THREE.SRGBColorSpace; return { map: t }; });
 
+function bleed(C, rgb) { const x = C.getContext('2d'); const d = x.getImageData(0, 0, C.width, C.height); const a = d.data; for (let i = 0; i < a.length; i += 4) if (a[i + 3] < 8) { a[i] = rgb[0]; a[i + 1] = rgb[1]; a[i + 2] = rgb[2]; a[i + 3] = 1; } x.putImageData(d, 0, 0); }
 // Material helper with caching. repeat applies to all maps of that set.
 const matCache = new Map();
 export function pbr(name, opts = {}) {

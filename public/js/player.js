@@ -56,8 +56,25 @@ export class Player {
     if (this.vmGun) { this.vm.remove(this.vmGun.group); this.vmGun = null; }
     if (!w) { this.op.attachGun(null); return; }
     w.model = buildGun(w.id, w.mods); this.op.attachGun(w.model);
-    this.vmGun = buildGun(w.id, w.mods); this.vm.add(this.vmGun.group); this.vmGun.group.traverse((o) => { if (o.isMesh) { o.castShadow = false; } });
+    this.vmGun = buildGun(w.id, w.mods); this.vm.add(this.vmGun.group); this.addVmHands(this.vmGun);
+    this.vmGun.group.traverse((o) => { if (o.isMesh) { o.castShadow = false; } });
     this.swapT = 0.45; audio.mech(null, 'reload');
+  }
+  // gloved hands + sleeves for the first-person viewmodel, posed on the grip and the handguard
+  addVmHands(gm) {
+    const M = this.op.M; const g = gm.group;
+    const hand = (at, back, out, sx) => {
+      const h = new THREE.Group(); h.position.copy(at); g.add(h);
+      const glove = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.085, 0.095), M.gloves); glove.position.set(sx * 0.012, -0.01, 0); h.add(glove);
+      const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.05), M.gloves); thumb.position.set(-sx * 0.022, 0.03, -0.025); h.add(thumb);
+      const arm = new THREE.Group(); arm.position.set(sx * 0.01, -0.03, 0.03); arm.rotation.set(back, out, 0); h.add(arm);
+      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.05, 0.42, 7).translate(0, -0.21, 0), M.uni); sleeve.rotation.x = Math.PI / 2 - 0.2; sleeve.position.z = 0.02; arm.add(sleeve);
+      const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.044, 0.04, 7), M.gloves); cuff.rotation.x = Math.PI / 2 - 0.2; cuff.position.z = 0.02; arm.add(cuff);
+      return h;
+    };
+    hand(gm.grip, -0.6, 0.15, 1);
+    if (gm.fore) hand(gm.fore.clone().add(new THREE.Vector3(-0.01, 0.0, 0)), -0.3, -0.5, -1);
+    else hand(gm.grip.clone().add(new THREE.Vector3(-0.028, -0.005, -0.005)), -0.5, -0.4, -1);
   }
   spawn(pos, yaw) { this.pos.copy(pos); this.vel.set(0, 0, 0); this.yaw = yaw; this.pitch = 0; this.dead = false; this.op.dead = 0; this.op.rig.rotation.set(0, 0, 0); this.op.rig.position.set(0, 0, 0); }
   damage(n, from) {
@@ -245,7 +262,7 @@ export class Player {
     const bobA = Math.min(1, speed / 4) * (1 - z * 0.9);
     this.vmKick = (this.vmKick || 0) * Math.exp(-dt * 16);
     // hip: offset right/down; ADS: sight on camera axis
-    const s = vm.sight; const hip = new THREE.Vector3(0.17, -0.2, -0.38 - 0.0).sub(vm.grip.clone().multiplyScalar(0.0));
+    const s = vm.sight; const hip = new THREE.Vector3(0.16, -0.155, -0.4);
     const ads = new THREE.Vector3(0, -s.y, -(s.z + s.eye) + 0.0);
     const p = hip.lerp(ads, z);
     p.x += Math.sin(this.bob) * 0.012 * bobA; p.y += Math.abs(Math.cos(this.bob)) * 0.012 * bobA; p.z += this.vmKick * 0.045;
