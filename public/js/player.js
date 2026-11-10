@@ -5,6 +5,7 @@ import { Operator } from './character.js';
 import { buildGun } from './guns.js';
 import { WEAPONS, ITEMS, weaponStats, DEFAULT_MODS, encumbrance, entryKg, BODY_KG } from './items.js';
 import { WeaponAnimator } from './anim.js';
+import { Ballistics, CARTRIDGE } from './ballistics.js';
 import { audio } from './audio.js';
 
 // Mouse capture: real pointer lock where the browser allows it; otherwise (embedded frames, some app views) a "soft"
@@ -70,7 +71,7 @@ export class Player {
     this.packId = pack || 'pack1'; this.op.setPack(+this.packId.slice(-1)); this.op.setVest(vest ? +vest.slice(-1) : 0);
     this.equipCurrent(true);
   }
-  makeWeapon(w) { const s = weaponStats(w); return { id: w.id, mods: { ...DEFAULT_MODS, ...(w.mods || {}) }, uid: w.uid, stats: s, mag: w.mag ?? s.mag, model: null }; }
+  makeWeapon(w) { const s = weaponStats(w); return { id: w.id, mods: { ...DEFAULT_MODS, ...(w.mods || {}) }, uid: w.uid, stats: s, mag: w.mag ?? s.mag, model: null, mode: s.modes[s.modes.length - 1], zero: s.scope ? 100 : 50, burstLeft: 0 }; }
   equipCurrent(instant) {
     const w = this.weapon; this.reloadT = -1; this.anim.stop();
     if (this.vmGun) { this.vm.remove(this.vmGun.group); this.vmGun = null; }
@@ -102,6 +103,7 @@ export class Player {
     let left = n;
     if (this.armor > 0) { const a = Math.min(this.armor, n * 0.7); this.armor -= a; left -= a; }
     this.hp -= left; this.game.ui.hurt(from, n); this.flinch = true;
+    if (left >= 14 && Math.random() < 0.35 && !this.bleeding) { this.bleeding = true; this.game.ui.toast('You are bleeding — bandage up (Q)'); }
     this.healT = -1; audio.hit(this.pos, 'flesh');
     this.game.ai?.onPlayerHit(from);
     if (this.hp <= 0) { this.hp = 0; this.dead = true; this.game.onPlayerDeath(by); }
@@ -123,7 +125,7 @@ export class Player {
     if (input.locked && !this.dead) {
       const zoomSens = this.aimT > 0.5 ? 1 / Math.max(1, (this.weapon?.stats.zoom || 1) * 0.8) : 1;
       const sens = 0.0022 * (G.settings.sens || 1) * zoomSens;
-      this.yaw -= input.mx * sens; this.pitch -= input.my * sens; this.pitch = THREE.MathUtils.clamp(this.pitch, -1.45, 1.45);
+      this.yaw -= input.mx * sens; this.pitch -= input.my * sens; this.lastMx = input.mx / Math.max(dt, 1e-3) * 0.016; this.lastMy = input.my / Math.max(dt, 1e-3) * 0.016; this.pitch = THREE.MathUtils.clamp(this.pitch, -1.45, 1.45);
     }
     const rec = Math.min(1, dt * 7); this.pitch += this.kick.y * rec; this.yaw += this.kick.x * rec; this.kick.multiplyScalar(1 - rec);
     if (canAct && input.hit('KeyV')) { this.fp = !this.fp; this.game.settings.view = this.fp ? 'first' : 'third'; this.game.saveSettings(); }
@@ -138,6 +140,8 @@ export class Player {
     const holdBreath = aiming && input.down('ShiftLeft') && this.stamina > 5 && this.weapon?.stats.scope;
     if ((sprint || holdBreath) && !stimBoost) { this.stamina = Math.max(0, this.stamina - dt * (holdBreath ? 18 : 14) * E.stamina); this.stRegen = 1.2; } else { this.stRegen = (this.stRegen || 0) - dt; if (this.stRegen <= 0) this.stamina = Math.min(100, this.stamina + dt * 22 / Math.sqrt(E.stamina)); }
     this.stimT = Math.max(0, (this.stimT || 0) - dt);
+    if (this.bleeding && !this.dead && G.mode === 'raid') { this.bleedT = (this.bleedT || 0) + dt; if (this.bleedT > 1.25) { this.bleedT = 0; this.hp -= 1; if (Math.random() < 0.5) G.fx.impact(this.pos.clone().setY(this.pos.y + 0.05), new THREE.Vector3(0, 1, 0), 'flesh'); if (this.hp <= 0) { this.hp = 0; this.dead = true; G.onPlayerDeath('bleeding'); } } }
+    if (G.mode !== 'raid') this.bleeding = false;
     const wspd = this.weapon?.stats.speed || 1;
     let speed = (sprint ? 6.6 : this.crouch ? 2.2 : aiming ? 2.7 : 4.3) * wspd * (this.healT >= 0 ? 0.5 : 1) * E.speed;
     if (!canAct) speed = 0;
@@ -188,13 +192,18 @@ export class Player {
     const w = this.weapon;
     if (w && canAct && !opts.build) {
       const st = w.stats;
-      if (input.hit('KeyR') && !reloading && w.mag < st.mag && G.pack.count(st.ammo) > 0 && !this.anim.busy) this.startReload();
+      if (input.hit('KeyR') && !reloading && w.mag < st.mag + (st.perShell || WEAPONS[w.id].openBolt ? 0 : 1) && G.pack.count(st.ammo) > 0 && !this.anim.busy) this.startReload();
       if (this.anim.name === 'pumpShell' && (input.buttons & 1) && w.mag > 0) { this.anim.stop(); this.reloadT = -1; this.anim.play('pumpRack', 0.4); }
-      const trig = st.auto ? (input.buttons & 1) : (input.clicked & 1);
+      if (input.hit('KeyX') && st.modes.length > 1) { const i = st.modes.indexOf(w.mode); w.mode = st.modes[(i + 1) % st.modes.length]; audio.click(2200, 0.06, 0.02); G.ui.toast(`Fire mode: ${w.mode.toUpperCase()}`); }
+      if (st.scope && (input.hit('PageUp') || input.hit('Equal'))) { w.zero = Math.min(800, w.zero + 100); G.ui.toast(`Zero ${w.zero} m`); }
+      if (st.scope && (input.hit('PageDown') || input.hit('Minus'))) { w.zero = Math.max(100, w.zero - 100); G.ui.toast(`Zero ${w.zero} m`); }
+      if (w.mode === 'burst' && (input.clicked & 1) && w.burstLeft <= 0) w.burstLeft = 3;
+      if (!(input.buttons & 1) && w.mode === 'burst' && w.burstLeft < 3) w.burstLeft = Math.min(w.burstLeft, 0);
+      const trig = w.mode === 'auto' ? (input.buttons & 1) : w.mode === 'burst' ? w.burstLeft > 0 : (input.clicked & 1);
       const busy = this.anim.busy && this.anim.name !== 'inspect';
       if (trig && this.fireCD <= 0 && !reloading && !busy && this.healT < 0 && !this.sprinting) {
         if (this.anim.name === 'inspect') this.anim.stop();
-        if (w.mag > 0) this.fire(); else { audio.mech(this.pos, 'empty'); this.fireCD = 0.25; if (G.pack.count(st.ammo) > 0) this.startReload(); }
+        if (w.mag > 0) { this.fire(); if (w.mode === 'burst') w.burstLeft--; } else { w.burstLeft = 0; audio.mech(this.pos, 'empty'); this.fireCD = 0.25; if (G.pack.count(st.ammo) > 0) this.startReload(); }
       }
     }
     this.anim.empty = !!(w && w.mag === 0 && w.stats.cls === 'Pistol');
@@ -229,17 +238,19 @@ export class Player {
     const empty = w.mag === 0;
     const clip = kind === 'bolt' ? 'boltLoad' : kind;
     audio.mech(this.pos, 'reload');
-    this.anim.play(clip, st.reload * (empty ? 1.12 : 1), () => { const need = st.mag - w.mag; w.mag += G.pack.take(st.ammo, need); this.reloadT = -1; audio.mech(this.pos, 'pump'); });
+    const plusOne = !empty && !WEAPONS[w.id].openBolt && kind !== 'bolt';
+    this.anim.play(clip, st.reload * (empty ? 1.12 : 1), () => { const cap = st.mag + (plusOne ? 1 : 0); const need = cap - w.mag; w.mag += G.pack.take(st.ammo, need); this.reloadT = -1; audio.mech(this.pos, 'pump'); });
   }
   startHeal(kind) {
     const G = this.game; let id = null;
     if (kind === 'plate') { if (!this.vestId) return G.ui.toast('No armor vest equipped'); if (this.armor >= this.maxArmor) return G.ui.toast('Armor is full'); if (G.pack.count('plate') > 0) id = 'plate'; }
-    else { if (this.hp >= this.maxHp) return G.ui.toast('Health is full'); const miss = this.maxHp - this.hp; const order = miss > 50 ? ['medkit', 'stim', 'bandage'] : miss > 25 ? ['stim', 'bandage', 'medkit'] : ['bandage', 'stim', 'medkit']; id = order.find((k) => G.pack.count(k) > 0); }
+    else { if (this.hp >= this.maxHp && !this.bleeding) return G.ui.toast('Health is full'); const miss = this.maxHp - this.hp; const order = miss > 50 ? ['medkit', 'stim', 'bandage'] : miss > 25 ? ['stim', 'bandage', 'medkit'] : ['bandage', 'stim', 'medkit']; id = order.find((k) => G.pack.count(k) > 0); }
     if (!id) return G.ui.toast(kind === 'plate' ? 'No armor plates' : 'No medical supplies');
     this.healItem = id; this.healT = 0; this.reloadT = -1; this.anim.stop(); audio.click(500, 0.08, 0.15, 'sine');
   }
   finishHeal() {
     const G = this.game, it = ITEMS[this.healItem]; G.pack.take(this.healItem, 1);
+    if (this.healItem !== 'plate') this.bleeding = false;
     if (this.healItem === 'plate') this.armor = Math.min(this.maxArmor, this.armor + 50); else { this.hp = Math.min(this.maxHp, this.hp + it.heal); if (it.stamina) { this.stimT = it.stamina; this.stamina = 100; } }
     G.ui.toast(`${it.name} used`); this.healT = -1; audio.click(800, 0.08, 0.2, 'sine');
   }
@@ -254,26 +265,20 @@ export class Player {
     const gun = this.fpNow ? this.vmGun : w.model;
     const muzzle = gun.muzzle.getWorldPosition(new THREE.Vector3());
     const spreadDeg = this.spreadNow + (this.spreadBloom || 0) * (1 - this.aimT * 0.6);
-    const targets = G.hitTargets();
+    // real ballistics: each pellet / bullet is a projectile with the cartridge's velocity, drop and drag; the barrel is
+    // angled up by the zero so the round crosses the sight line at the zeroed distance
+    const zeroA = Ballistics.zeroAngle(st.ammo, w.zero || 50);
+    const right = new THREE.Vector3().crossVectors(d, new THREE.Vector3(0, 1, 0)).normalize(), up = new THREE.Vector3().crossVectors(right, d);
     for (let p = 0; p < st.pellets; p++) {
       const sp = THREE.MathUtils.degToRad(st.pellets > 1 ? st.pelletSpread + spreadDeg * 0.3 : spreadDeg) * 0.5;
       const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * sp;
-      const right = new THREE.Vector3().crossVectors(d, new THREE.Vector3(0, 1, 0)).normalize(), up = new THREE.Vector3().crossVectors(right, d);
-      const dir = d.clone().addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
-      const maxT = 700; const wh = G.world.col.ray(o, dir, maxT, { skipNonSolid: true });
-      let best = wh ? wh.t : maxT, eh = null;
-      for (const e of targets) { if (!e.alive || e.pos.distanceToSquared(o) > (best + 8) ** 2) continue; const h = e.hitTest(o, dir, best); if (h && h.t < best) { best = h.t; eh = h; } }
-      const vh = G.vehicleRayHit?.(o, dir, best); if (vh && vh.t < best) { best = vh.t; eh = null; vh.veh.damage(st.damage * 0.5, vh.point); G.fx.impact(vh.point, null, 'metal'); }
-      const end = o.clone().addScaledVector(dir, best);
-      if (eh) {
-        const dist = best; const fall = dist <= st.range ? 1 : Math.max(0.45, 1 - (dist - st.range) / (st.range * 2.5));
-        const dmg = st.damage * fall * eh.mult; eh.point = end; eh.enemy.damage(dmg, eh, this.pos, true); G.ui.hitmarker(eh.mult > 1.4, !eh.enemy.alive); audio.hitmarker();
+      const dir = d.clone().addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r + zeroA).normalize();
+      G.ballistics.fire(o, dir, { ammo: st.ammo, damage: st.damage, muzzle, range: st.range, color: 0xffd080, onHit: (eh, end, dmg, dist) => {
+        eh.point = end; eh.enemy.damage(dmg * eh.mult, eh, this.pos, true); G.ui.hitmarker(eh.mult > 1.4, !eh.enemy.alive); audio.hitmarker();
         if (eh.enemy.type !== 'raider' && eh.enemy.type !== 'player') audio.hit(end, 'machine');
-        this.stats.hitsN++; this.stats.shotsDist += dist; if (eh.mult > 1.4) this.stats.heads++;
-        G.ai?.onPlayerHitEnemy(eh.enemy, dist);
-      } else if (wh && !vh) { G.fx.impact(wh.point, wh.normal, wh.mat); if (Math.random() < 0.5) audio.hit(wh.point, wh.mat); G.noise(wh.point, 10 * (st.loud < 0.5 ? 2 : 1), null, true); }
-      if (p === 0 || Math.random() < 0.4) G.fx.tracer(muzzle, end, 0xffd080, 420);
-      if (p === 0) G.net?.event('shot', [muzzle.x, muzzle.y, muzzle.z, end.x, end.y, end.z, st.loud < 0.5 ? 1 : 0]);
+        this.stats.hitsN++; this.stats.shotsDist += dist; if (eh.mult > 1.4) this.stats.heads++; G.ai?.onPlayerHitEnemy(eh.enemy, dist);
+      } });
+      if (p === 0) G.net?.event('shot', [+muzzle.x.toFixed(2), +muzzle.y.toFixed(2), +muzzle.z.toFixed(2), +dir.x.toFixed(4), +dir.y.toFixed(4), +dir.z.toFixed(4), st.loud < 0.5 ? 1 : 0, st.ammo]);
     }
     this.stats.shots++; if (Math.hypot(this.vel.x, this.vel.z) < 0.5) this.stats.stillShootT += 60 / st.rpm;
     const rm = (this.crouch ? 0.82 : 1) * (this.aimT > 0.5 ? 0.85 : 1) * (0.85 + this.enc.sway * 0.1);
@@ -325,8 +330,12 @@ export class Player {
     if (this.sprinting) { p.x += 0.05; p.y -= 0.06; }
     if (this.healT >= 0) p.y -= 0.25;
     const g = pose.gun; p.x += g[3]; p.y += g[4]; p.z += g[5];
+    // weapon inertia: the gun lags behind fast mouse turns (heavier guns lag more), springing back
+    const inert = 0.00004 * (0.6 + (st.kg || 3) * 0.15) * (1 - z * 0.7); this.vmLag = this.vmLag || new THREE.Vector2();
+    this.vmLag.x += (THREE.MathUtils.clamp(-(this.lastMx || 0) * inert, -0.03, 0.03) - this.vmLag.x) * Math.min(1, dt * 10); this.vmLag.y += (THREE.MathUtils.clamp((this.lastMy || 0) * inert, -0.03, 0.03) - this.vmLag.y) * Math.min(1, dt * 10);
+    p.x += this.vmLag.x; p.y += this.vmLag.y;
     vm.group.position.lerp(p, Math.min(1, dt * 25));
-    const rx = this.vmKick * 0.06 + (this.sprinting ? -0.5 : 0) + g[0], ry = (this.sprinting ? 0.6 : 0) + (1 - z) * 0.03 + g[1], rz = (this.sprinting ? 0.3 : 0) + g[2];
+    const rx = this.vmKick * 0.06 + (this.sprinting ? -0.5 : 0) + g[0] - this.vmLag.y * 2, ry = (this.sprinting ? 0.6 : 0) + (1 - z) * 0.03 + g[1] + this.vmLag.x * 3, rz = (this.sprinting ? 0.3 : 0) + g[2] + this.vmLag.x * 4;
     const k = Math.min(1, dt * 16); vm.group.rotation.x += (rx - vm.group.rotation.x) * k; vm.group.rotation.y += (ry - vm.group.rotation.y) * k; vm.group.rotation.z += (rz - vm.group.rotation.z) * k;
     this.anim.apply(vm);
     // hands follow the animation targets; sleeves point back toward the shoulders

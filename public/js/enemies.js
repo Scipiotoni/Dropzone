@@ -335,7 +335,7 @@ export class Sentinel extends Enemy {
 
 // ------------------------------------------------------------------ Raider (hostile human, low-poly operator) with squad tactics
 // [weapon id, mods, damage, fire interval, burst] — sound and mag size come from the weapon data
-const RAIDER_GUNS = { rifle: [['akm', {}], ['ak74', { optic: 'reddot' }], ['ar', { optic: 'reddot' }], ['br', { optic: 'holo', muzzle: 'brake' }]], smg: [['mp5', {}], ['ump', {}], ['vx', {}]], shotgun: [['sg', {}]], marksman: [['svd', { optic: 'prism' }], ['dmr', { optic: 'prism' }]], pistol: [['m1911', {}], ['p9', {}]] };
+const RAIDER_GUNS = { rifle: [['akm', {}], ['ak74', { optic: 'reddot' }], ['ar', { optic: 'reddot' }], ['br', { optic: 'holo', muzzle: 'brake' }], ['scar', { optic: 'holo' }], ['aug', {}]], smg: [['mp5', {}], ['ump', {}], ['vx', {}], ['mp7', { optic: 'reddot' }], ['vector', {}], ['p90', {}]], shotgun: [['sg', {}], ['m4s', {}]], marksman: [['svd', { optic: 'prism' }], ['dmr', { optic: 'prism' }], ['mosin', {}]], pistol: [['m1911', {}], ['p9', {}], ['m9', {}]] };
 const AMMO_OF = (id) => WEAPONS[id].ammo;
 export class Raider extends Enemy {
   constructor(game, pos, tier = 0, opts = {}) {

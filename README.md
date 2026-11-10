@@ -39,6 +39,26 @@ Set your callsign on the main menu.
 5. **Extract.** Two of the four LZs are active each raid (◆ on the compass, `M` for the map). Call the
    helicopter at the console and hold the pad while it flies in. It lands and waits 40 seconds for you to board.
 
+## Ballistics and realism
+
+- Every shot is a simulated projectile with the cartridge's real muzzle velocity, gravity drop, drag and
+  time of flight, from 260 m/s for .45 ACP to 900 m/s for 5.56. The tracer follows the real path.
+- Scoped weapons can be zeroed from 100 to 800 m (PgUp/PgDn).
+- Bullets penetrate thin wood and sheet metal depending on calibre (.50 BMG goes through a lot), and they lose damage as they lose energy.
+- Fire selector (X) switches between semi, burst and auto where the real weapon has them.
+- Tactical reloads keep a round in the chamber (+1). Empty reloads take longer and you charge the weapon.
+- Heavy hits can make you bleed until you bandage up.
+- The first-person weapon lags behind fast mouse turns, more for heavier guns.
+
+## Your home
+
+Haven has your own two-storey house. You can walk through the living room and kitchen, see your stash
+weapons mounted on the armory wall, check the hotzone map board, and climb the stairs to the bunk room
+and balcony. There is a Humvee in the carport you can drive around the base. You can play in first or
+third person (menu setting, or V at any time). Where the browser frame refuses mouse capture, the game
+falls back to soft mouse look: move the mouse to look, push against a screen edge to keep turning, or
+use the arrow keys.
+
 ## Carry weight
 
 Every item has a real weight in kg: weapons and their attachments, loaded magazines, ammo by the round,
@@ -86,9 +106,10 @@ Demolish with `F` for a 50% refund.
 
 ## Weapons and attachments
 
-There are 15 real-world firearms: Glock 17, Colt M1911A1, Desert Eagle Mk XIX, SIG MPX, H&K MP5A3,
-H&K UMP45, Colt M4A1, AKM, AK-74M, H&K HK417, FN M249 SAW, M14 EBR, SVD Dragunov, Remington M24 SWS
-and Remington 870. Each is built part by part with real proportions and real calibers (9×19, .45 ACP,
+There are 24 real-world firearms: Glock 17, Beretta M9A1, Colt M1911A1, Desert Eagle Mk XIX, SIG MPX,
+H&K MP5A3, H&K UMP45, H&K MP7A1, KRISS Vector, FN P90, Colt M4A1, FN SCAR-L, Steyr AUG A3, AKM, AK-74M,
+H&K HK417, FN M249 SAW, M14 EBR, SVD Dragunov, Remington M24 SWS, Mosin-Nagant M91/30, Barrett M82A1,
+Remington 870 and Benelli M4. Each is built part by part with real proportions and real calibers (9×19, .45 ACP,
 .50 AE, 5.56, 5.45, 7.62×39, 7.62×51, 7.62×54R, 12 ga).
 
 Every weapon has full animations, in first and third person:
@@ -135,7 +156,8 @@ steel, polymer stippling, camo and more) are generated as tileable PBR albedo, n
 maps at load time. Audio is synthesised with WebAudio. The terrain uses a height-blended 4-layer
 splat shader. Lighting is a physical sky with image-based lighting, soft shadows, bloom, ACES tone
 mapping and colour grading, ground-truth ambient occlusion (GTAO), height fog and a procedural cloud
-layer. Characters are faceted low-poly with fabric and camo textures, and they
+layer. Surfaces use height maps for parallax occlusion mapping, plus cavity ambient occlusion and
+roughness/metalness maps. Characters are faceted low-poly with fabric and camo textures, and they
 use two-bone arm IK on the weapon.
 
 Progress and the AI's profile of you are saved in `localStorage`.

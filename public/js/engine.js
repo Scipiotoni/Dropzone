@@ -13,7 +13,7 @@ THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\n varying float vFogDepth; v
 THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\n vFogDepth = - mvPosition.z; vFogY = cameraPosition.y + (transpose(mat3(viewMatrix)) * mvPosition.xyz).y;\n#endif';
 THREE.ShaderChunk.fog_pars_fragment = '#ifdef USE_FOG\n uniform vec3 fogColor; varying float vFogDepth; varying float vFogY;\n #ifdef FOG_EXP2\n uniform float fogDensity;\n #else\n uniform float fogNear; uniform float fogFar;\n #endif\n#endif';
 THREE.ShaderChunk.fog_fragment = '#ifdef USE_FOG\n #ifdef FOG_EXP2\n float hAtt = mix(1.0, 0.35, smoothstep(10.0, 90.0, vFogY));\n float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth * hAtt );\n #else\n float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );\n #endif\n gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );\n#endif';
-import { setAniso } from './textures.js';
+import { setAniso, POM } from './textures.js';
 
 const GradeShader = {
   uniforms: { tDiffuse: { value: null }, time: { value: 0 }, vignette: { value: 0.32 }, hurt: { value: 0 }, sat: { value: 0.9 }, tint: { value: new THREE.Vector3(1.02, 1.0, 0.96) }, grain: { value: 0.035 } },
@@ -98,7 +98,7 @@ export class Engine {
     r.setPixelRatio(q === 'low' ? Math.min(devicePixelRatio, 0.85) : q === 'ultra' ? Math.min(devicePixelRatio, 2) : Math.min(devicePixelRatio, 1.5));
     this.sunLight.shadow.mapSize.set(q === 'low' ? 2048 : 4096, q === 'low' ? 2048 : 4096); this.sunLight.shadow.radius = q === 'low' ? 1 : 2;
     if (this.sunLight.shadow.map) { this.sunLight.shadow.map.dispose(); this.sunLight.shadow.map = null; }
-    this.bloom.enabled = q !== 'low'; this.gtao.enabled = q === 'ultra' || q === 'high';
+    this.bloom.enabled = q !== 'low'; this.gtao.enabled = q === 'ultra' || q === 'high'; POM.value = q === 'low' ? 0 : q === 'medium' ? 0.6 : 1;
     for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) { rt.samples = q === 'low' ? 0 : 4; rt.dispose(); }
     this.resize();
   }

@@ -77,15 +77,27 @@ export function bake(size, sample, normalStrength = 2) {
     // roughness in G, metalness in B (three's convention for metalnessMap/roughnessMap)
     rough[i * 4] = 255; rough[i * 4 + 1] = clamp(s.r ?? 0.8) * 255; rough[i * 4 + 2] = clamp(s.m ?? 0) * 255; rough[i * 4 + 3] = 255;
   }
+  // height range -> normalised height stored in the normal map's alpha (parallax) ; cavity AO in the ORM red channel
+  let hmin = Infinity, hmax = -Infinity; for (let i = 0; i < n; i++) { if (H[i] < hmin) hmin = H[i]; if (H[i] > hmax) hmax = H[i]; }
+  const hr = Math.max(1e-6, hmax - hmin);
+  const blur = boxBlur(H, size, Math.max(2, size >> 6));
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const i = y * size + x;
     const l = H[y * size + (x - 1 + size) % size], r = H[y * size + (x + 1) % size];
     const u = H[((y - 1 + size) % size) * size + x], d = H[((y + 1) % size) * size + x];
     let nx = (l - r) * normalStrength * size / 256, ny = (u - d) * normalStrength * size / 256, nz = 1;
     const len = Math.hypot(nx, ny, nz); nx /= len; ny /= len; nz /= len;
-    nor[i * 4] = (nx * 0.5 + 0.5) * 255; nor[i * 4 + 1] = (ny * 0.5 + 0.5) * 255; nor[i * 4 + 2] = (nz * 0.5 + 0.5) * 255; nor[i * 4 + 3] = 255;
+    nor[i * 4] = (nx * 0.5 + 0.5) * 255; nor[i * 4 + 1] = (ny * 0.5 + 0.5) * 255; nor[i * 4 + 2] = (nz * 0.5 + 0.5) * 255; nor[i * 4 + 3] = ((H[i] - hmin) / hr) * 255;
+    const cav = Math.max(0, (blur[i] - H[i]) / hr); rough[i * 4] = clamp(1 - cav * 2.2, 0.25, 1) * 255;
   }
   return { map: dataTex(col, size, true), normalMap: dataTex(nor, size, false), roughnessMap: dataTex(rough, size, false), hasAlpha };
+}
+
+function boxBlur(src, size, r) {
+  const tmp = new Float32Array(src.length), out = new Float32Array(src.length), w = 2 * r + 1;
+  for (let y = 0; y < size; y++) { let acc = 0; for (let k = -r; k <= r; k++) acc += src[y * size + ((k + size) % size)]; for (let x = 0; x < size; x++) { tmp[y * size + x] = acc / w; acc += src[y * size + ((x + r + 1) % size)] - src[y * size + ((x - r + size) % size)]; } }
+  for (let x = 0; x < size; x++) { let acc = 0; for (let k = -r; k <= r; k++) acc += tmp[((k + size) % size) * size + x]; for (let y = 0; y < size; y++) { out[y * size + x] = acc / w; acc += tmp[((y + r + 1) % size) * size + x] - tmp[((y - r + size) % size) * size + x]; } }
+  return out;
 }
 
 // ---------- the library (lazily built & cached)
@@ -223,7 +235,46 @@ export function pbr(name, opts = {}) {
   const m = new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, roughnessMap: t.roughnessMap, metalnessMap: t.roughnessMap,
     roughness: 1, metalness: opts.metal ?? 1, color: opts.color ?? 0xffffff, side: opts.side ?? THREE.FrontSide });
   if (opts.normalScale) m.normalScale.set(opts.normalScale, opts.normalScale);
+  m.aoMap = t.roughnessMap; m.aoMapIntensity = opts.ao ?? 0.85;
+  const depth = opts.pom ?? POM_DEPTH[name] ?? 0; if (depth > 0) addParallax(m, depth);
   if (opts.emissive) { m.emissive = new THREE.Color(opts.emissive); m.emissiveIntensity = opts.emissiveIntensity ?? 1; }
   matCache.set(key, m);
   return m;
+}
+
+// ---------- parallax occlusion mapping (height in normal-map alpha). Screen-space tangent frame, so it works on any
+// mesh with sensible UVs. Global strength is driven by the graphics quality (0 disables it).
+export const POM = { value: 1 };
+const POM_DEPTH = { brick: 0.05, concrete: 0.018, rock: 0.06, asphalt: 0.015, woodPlank: 0.02, tile: 0.02, metalPlate: 0.012, corrugated: 0.03, sandbag: 0.03, bark: 0.05, dirt: 0.03, rust: 0.012 };
+const POM_GLSL = `
+  vec2 pUv = vMapUv;
+  if (pomScale > 0.0) {
+    vec3 Vv = normalize(vViewPosition);
+    vec3 q0 = dFdx(-vViewPosition), q1 = dFdy(-vViewPosition); vec2 st0 = dFdx(vMapUv), st1 = dFdy(vMapUv);
+    vec3 Nn = normalize(vNormal) * (gl_FrontFacing ? 1.0 : -1.0);
+    vec3 q1p = cross(q1, Nn), q0p = cross(Nn, q0);
+    vec3 Tt = q1p * st0.x + q0p * st1.x, Bt = q1p * st0.y + q0p * st1.y;
+    float dd = max(dot(Tt, Tt), dot(Bt, Bt)); float sc = dd == 0.0 ? 0.0 : inversesqrt(dd); Tt *= sc; Bt *= sc;
+    vec3 Vt = vec3(dot(Vv, Tt), dot(Vv, Bt), dot(Vv, Nn));
+    float nl = mix(22.0, 8.0, clamp(abs(Vt.z), 0.0, 1.0)); float layer = 1.0 / nl;
+    vec2 dUV = Vt.xy / max(Vt.z, 0.25) * pomScale * layer;
+    vec2 uvp = vMapUv; float hh = 1.0 - texture2D(normalMap, uvp).a; float cur = 0.0;
+    for (int i = 0; i < 22; i++) { if (cur >= hh || float(i) >= nl) break; uvp -= dUV; hh = 1.0 - texture2D(normalMap, uvp).a; cur += layer; }
+    vec2 prv = uvp + dUV; float aft = hh - cur; float bef = (1.0 - texture2D(normalMap, prv).a) - cur + layer;
+    pUv = mix(uvp, prv, clamp(aft / (aft - bef + 1e-5), 0.0, 1.0));
+  }
+`;
+function addParallax(m, depth) {
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.pomScale = { get value() { return POM.value * depth; } };
+    const sub = (chunk, from) => THREE.ShaderChunk[chunk].split(from).join('pUv');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float pomScale;')
+      .replace('#include <map_fragment>', POM_GLSL + sub('map_fragment', 'vMapUv'))
+      .replace('#include <roughnessmap_fragment>', sub('roughnessmap_fragment', 'vRoughnessMapUv'))
+      .replace('#include <metalnessmap_fragment>', sub('metalnessmap_fragment', 'vMetalnessMapUv'))
+      .replace('#include <normal_fragment_maps>', sub('normal_fragment_maps', 'vNormalMapUv'))
+      .replace('#include <aomap_fragment>', sub('aomap_fragment', 'vAoMapUv'));
+  };
+  m.customProgramCacheKey = () => 'pom' + depth;
 }

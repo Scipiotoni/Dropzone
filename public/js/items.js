@@ -24,6 +24,9 @@ export const ITEMS = {
   a545: { kg: 0.011, name: '5.45×39mm', type: 'ammo', icon: '⁞', rarity: 'common', stack: 120, desc: 'Small-calibre high-velocity cartridge (AK-74).' },
   a45:  { kg: 0.021, name: '.45 ACP', type: 'ammo', icon: '⁞', rarity: 'common', stack: 100, desc: 'Heavy subsonic pistol round (M1911, UMP-45).' },
   a50:  { kg: 0.03, name: '.50 AE', type: 'ammo', icon: '⁞', rarity: 'rare', stack: 40, desc: 'Magnum handgun cartridge (Desert Eagle).' },
+  a57: { kg: 0.006, name: '5.7×28mm', type: 'ammo', icon: '⁞', rarity: 'uncommon', stack: 150, desc: 'Small, fast bottlenecked PDW round (P90).' },
+  a46: { kg: 0.007, name: '4.6×30mm', type: 'ammo', icon: '⁞', rarity: 'uncommon', stack: 150, desc: 'Armour-piercing PDW round (MP7).' },
+  a50bmg: { kg: 0.115, name: '.50 BMG', type: 'ammo', icon: '⁞', rarity: 'epic', stack: 30, desc: '12.7×99mm heavy machine-gun / anti-materiel cartridge.' },
   a762r: { kg: 0.022, name: '7.62×54mmR', type: 'ammo', icon: '⁞', rarity: 'uncommon', stack: 60, desc: 'Rimmed full-power cartridge (SVD).' },
   // ---- consumables
   bandage: { kg: 0.05, name: 'Bandage', type: 'med', icon: '✚', rarity: 'common', stack: 5, heal: 20, time: 2.2, desc: 'Restores 20 HP.' },
@@ -63,7 +66,7 @@ export const WEAPONS = {
     slots: ['optic', 'muzzle', 'underbarrel', 'magazine', 'stock', 'tactical'], desc: '5.45×39 AK with plum polymer furniture, side-folding stock and a big muzzle brake.' },
   br:  { name: 'H&K HK417', short: 'HK417', cls: 'Battle Rifle', ammo: 'a762', mag: 20, rpm: 600, auto: true, damage: 46, pellets: 1, range: 120, recoil: 2.0, hrecoil: 0.8, spread: 2.8, ads: 0.26, reload: 2.7, speed: 0.92, rarity: 'rare', kg: 4.4, anim: 'rifle',
     slots: ['optic', 'muzzle', 'underbarrel', 'magazine', 'stock', 'tactical'], desc: 'Short-stroke piston 7.62×51 battle rifle. Hits hard, kicks hard.' },
-  m249: { name: 'FN M249 SAW', short: 'M249', cls: 'LMG', ammo: 'a556', mag: 100, rpm: 750, auto: true, damage: 30, pellets: 1, range: 100, recoil: 0.95, hrecoil: 0.75, spread: 3.4, ads: 0.4, reload: 5.2, speed: 0.86, rarity: 'epic', kg: 7.5, anim: 'lmg',
+  m249: { openBolt: true, name: 'FN M249 SAW', short: 'M249', cls: 'LMG', ammo: 'a556', mag: 100, rpm: 750, auto: true, damage: 30, pellets: 1, range: 100, recoil: 0.95, hrecoil: 0.75, spread: 3.4, ads: 0.4, reload: 5.2, speed: 0.86, rarity: 'epic', kg: 7.5, anim: 'lmg',
     slots: ['optic', 'underbarrel', 'tactical'], desc: 'Open-bolt belt-fed light machine gun with a 100-round soft pouch.' },
   dmr: { name: 'M14 EBR', short: 'M14 EBR', cls: 'DMR', ammo: 'a762', mag: 10, rpm: 300, auto: false, damage: 72, pellets: 1, range: 200, recoil: 3.0, hrecoil: 0.6, spread: 3.5, ads: 0.3, reload: 2.9, speed: 0.9, rarity: 'rare', kg: 5.1, anim: 'rifle',
     slots: ['optic', 'muzzle', 'underbarrel', 'magazine', 'stock', 'tactical'], desc: 'M14 action in an aluminium Enhanced Battle Rifle chassis.' },
@@ -71,6 +74,24 @@ export const WEAPONS = {
     slots: ['optic', 'muzzle', 'tactical'], desc: 'Short-stroke piston 7.62×54R marksman rifle with a skeleton thumbhole stock.' },
   m24: { name: 'Remington M24 SWS', short: 'M24', cls: 'Sniper', ammo: 'a762', mag: 5, rpm: 50, auto: false, bolt: true, damage: 118, pellets: 1, range: 300, recoil: 4.2, hrecoil: 0.6, spread: 5, ads: 0.34, reload: 3.2, speed: 0.9, rarity: 'epic', kg: 5.4, anim: 'bolt',
     slots: ['optic', 'muzzle', 'tactical'], desc: 'Remington 700 long-action bolt rifle in a fibreglass stock. One shot, one kill.' },
+  m9:  { name: 'Beretta M9A1', short: 'M9', cls: 'Pistol', ammo: 'a9', mag: 15, rpm: 420, auto: false, damage: 23, pellets: 1, range: 40, recoil: 1.5, hrecoil: 0.45, spread: 1.6, ads: 0.15, reload: 1.8, speed: 1.0, rarity: 'common', kg: 0.95, anim: 'pistol',
+    slots: ['muzzle', 'tactical'], desc: 'Open-slide, DA/SA 9mm US service pistol with a slide-mounted decocker.' },
+  vector: { name: 'KRISS Vector', short: 'VECTOR', cls: 'SMG', ammo: 'a45', mag: 25, rpm: 1100, auto: true, modes: ['semi', 'burst', 'auto'], damage: 27, pellets: 1, range: 35, recoil: 0.55, hrecoil: 0.4, spread: 2.0, ads: 0.17, reload: 2.2, speed: 0.98, rarity: 'rare', kg: 2.7, anim: 'rifle',
+    slots: ['optic', 'muzzle', 'magazine', 'tactical'], desc: 'Super V recoil-mitigation .45 SMG. Very high rate of fire, very little climb.' },
+  mp7: { name: 'H&K MP7A1', short: 'MP7', cls: 'SMG', ammo: 'a46', mag: 30, rpm: 950, auto: true, damage: 20, pellets: 1, range: 55, recoil: 0.65, hrecoil: 0.4, spread: 1.9, ads: 0.16, reload: 2.0, speed: 1.0, rarity: 'rare', kg: 1.9, anim: 'hk',
+    slots: ['optic', 'muzzle', 'underbarrel', 'tactical'], desc: 'Compact 4.6×30 PDW with the magazine in the grip. Penetrates soft armour.' },
+  p90: { name: 'FN P90', short: 'P90', cls: 'SMG', ammo: 'a57', mag: 50, rpm: 900, auto: true, damage: 21, pellets: 1, range: 55, recoil: 0.6, hrecoil: 0.35, spread: 1.9, ads: 0.17, reload: 2.6, speed: 0.99, rarity: 'rare', kg: 2.6, anim: 'rifle',
+    slots: ['optic', 'muzzle', 'tactical'], desc: 'Bullpup PDW with a 50-round translucent top-mounted magazine.' },
+  scar: { name: 'FN SCAR-L', short: 'SCAR-L', cls: 'Assault Rifle', ammo: 'a556', mag: 30, rpm: 625, auto: true, damage: 32, pellets: 1, range: 95, recoil: 1.0, hrecoil: 0.5, spread: 2.3, ads: 0.22, reload: 2.4, speed: 0.96, rarity: 'rare', kg: 3.3, anim: 'rifle',
+    slots: ['optic', 'muzzle', 'underbarrel', 'magazine', 'stock', 'tactical'], desc: 'Short-stroke piston 5.56 rifle with an aluminium upper and a side-folding stock.' },
+  aug: { name: 'Steyr AUG A3', short: 'AUG', cls: 'Assault Rifle', ammo: 'a556', mag: 30, rpm: 700, auto: true, damage: 31, pellets: 1, range: 100, recoil: 0.95, hrecoil: 0.45, spread: 2.2, ads: 0.24, reload: 2.7, speed: 0.97, rarity: 'rare', kg: 3.6, anim: 'rifle',
+    slots: ['optic', 'muzzle', 'tactical'], desc: 'Bullpup 5.56 with a 20" barrel in a compact package. Folding vertical foregrip.' },
+  m4s: { name: 'Benelli M4', short: 'M4 SUPER 90', cls: 'Shotgun', ammo: 'a12', mag: 7, rpm: 240, auto: false, damage: 14, pellets: 9, range: 20, recoil: 4.0, hrecoil: 1.0, spread: 4.3, pelletSpread: 3.4, ads: 0.24, reload: 0.5, perShell: true, speed: 0.94, rarity: 'rare', kg: 3.8, anim: 'pump',
+    slots: ['optic', 'muzzle', 'tactical'], desc: 'Gas-operated semi-automatic combat shotgun with a collapsible stock.' },
+  mosin: { name: 'Mosin-Nagant M91/30', short: 'MOSIN', cls: 'Sniper', ammo: 'a762r', mag: 5, rpm: 45, auto: false, bolt: true, damage: 110, pellets: 1, range: 260, recoil: 4.4, hrecoil: 0.7, spread: 5, ads: 0.34, reload: 3.4, speed: 0.91, rarity: 'uncommon', kg: 4.0, anim: 'bolt',
+    slots: ['optic', 'muzzle'], desc: 'Century-old bolt-action 7.62×54R service rifle. Crude, heavy, devastating.' },
+  m82: { name: 'Barrett M82A1', short: 'M82', cls: 'Sniper', ammo: 'a50bmg', mag: 10, rpm: 150, auto: false, damage: 230, pellets: 1, range: 600, recoil: 7.5, hrecoil: 1.4, spread: 6, ads: 0.5, reload: 3.6, speed: 0.82, rarity: 'legendary', kg: 14.0, anim: 'rifle',
+    slots: ['optic', 'tactical'], desc: 'Short-recoil semi-automatic .50 BMG anti-materiel rifle. Shreds machines and vehicles.' },
   sg:  { name: 'Remington 870', short: '870', cls: 'Shotgun', ammo: 'a12', mag: 7, rpm: 75, auto: false, pump: true, damage: 14, pellets: 9, range: 18, recoil: 4.5, hrecoil: 1.0, spread: 4.5, pelletSpread: 3.6, ads: 0.22, reload: 0.55, perShell: true, speed: 0.94, rarity: 'uncommon', kg: 3.6, anim: 'pump',
     slots: ['optic', 'muzzle', 'underbarrel', 'magazine', 'stock', 'tactical'], desc: 'Pump-action 12 gauge with tube magazine and shell side-saddle.' },
 };
@@ -82,7 +103,7 @@ export const MODS = {
   reddot: { kg: 0.12, slot: 'optic', name: 'MRS Red Dot', zoom: 1.25, ads: 0.95, rarity: 'common', desc: 'Low-profile reflex sight on a 1/3 co-witness riser.' },
   holo: { kg: 0.32, slot: 'optic', name: 'HX-2 Holographic', zoom: 1.3, ads: 1.0, rarity: 'uncommon', desc: 'Box-style holographic sight with 68 MOA ring.' },
   prism: { kg: 0.45, slot: 'optic', name: 'P4 Prism 4×', zoom: 3.0, ads: 1.15, scope: true, rarity: 'rare', desc: 'Compact 4× prism optic with etched chevron reticle.' },
-  scope6: { kg: 0.95, slot: 'optic', name: 'LR 2.5-10× Scope', zoom: 6.0, ads: 1.3, scope: true, rarity: 'epic', desc: '34mm tube variable-power scope in a cantilever mount.', only: ['dmr', 'br', 'ar', 'svd', 'm24', 'ak74', 'akm', 'm249'] },
+  scope6: { kg: 0.95, slot: 'optic', name: 'LR 2.5-10× Scope', zoom: 6.0, ads: 1.3, scope: true, rarity: 'epic', desc: '34mm tube variable-power scope in a cantilever mount.', only: ['dmr', 'br', 'ar', 'svd', 'm24', 'ak74', 'akm', 'm249', 'scar', 'aug', 'mosin', 'm82'] },
   // muzzle
   none_muz: { slot: 'muzzle', name: 'Bare Crown', builtin: true },
   comp: { kg: 0.15, slot: 'muzzle', name: 'Linear Compensator', recoil: 0.82, hrecoil: 0.8, loud: 1.2, rarity: 'common', desc: 'Ported compensator. Reduces climb.' },
@@ -123,6 +144,7 @@ export function weaponStats(w) {
     if (m.light) s.light = true;
   }
   s.zoom ??= 1.1; s.loud ??= 1; s.flash ??= 1;
+  s.modes = base.modes || (base.auto ? ['semi', 'auto'] : ['semi']);
   s.kg = base.kg; for (const slot of base.slots) s.kg += MODS[w.mods?.[slot] || DEFAULT_MODS[slot]]?.kg || 0;
   return s;
 }
@@ -146,6 +168,18 @@ export const RECIPES = [
   { out: { weapon: 'svd' }, cost: { scrap: 30, wood: 6, alloy: 5, glass: 2 }, station: 'workbench', lvl: 3 },
   { out: { weapon: 'm24' }, cost: { scrap: 30, polymer: 10, alloy: 6, glass: 3, servo: 1 }, station: 'workbench', lvl: 3 },
   { out: { weapon: 'm249' }, cost: { scrap: 45, polymer: 12, alloy: 8, servo: 2 }, station: 'workbench', lvl: 3 },
+  { out: { weapon: 'm9' }, cost: { scrap: 9, polymer: 3 }, station: 'workbench', lvl: 1 },
+  { out: { weapon: 'mosin' }, cost: { scrap: 22, wood: 10 }, station: 'workbench', lvl: 1 },
+  { out: { weapon: 'mp7' }, cost: { scrap: 20, polymer: 10, electronics: 2 }, station: 'workbench', lvl: 2 },
+  { out: { weapon: 'vector' }, cost: { scrap: 24, polymer: 12, alloy: 3 }, station: 'workbench', lvl: 2 },
+  { out: { weapon: 'p90' }, cost: { scrap: 22, polymer: 14, electronics: 2 }, station: 'workbench', lvl: 2 },
+  { out: { weapon: 'scar' }, cost: { scrap: 30, polymer: 10, alloy: 4 }, station: 'workbench', lvl: 2 },
+  { out: { weapon: 'aug' }, cost: { scrap: 28, polymer: 16, alloy: 3, glass: 1 }, station: 'workbench', lvl: 2 },
+  { out: { weapon: 'm4s' }, cost: { scrap: 26, polymer: 8, alloy: 3 }, station: 'workbench', lvl: 2 },
+  { out: { weapon: 'm82' }, cost: { scrap: 60, alloy: 14, servo: 3, glass: 4, core: 1 }, station: 'workbench', lvl: 3 },
+  { out: { item: 'a57', n: 100 }, cost: { scrap: 4, chemicals: 3 }, station: 'workbench', lvl: 2 },
+  { out: { item: 'a46', n: 100 }, cost: { scrap: 4, chemicals: 3 }, station: 'workbench', lvl: 2 },
+  { out: { item: 'a50bmg', n: 10 }, cost: { scrap: 8, chemicals: 5, alloy: 1 }, station: 'workbench', lvl: 3 },
   // ammo (workbench)
   { out: { item: 'a76239', n: 60 }, cost: { scrap: 4, chemicals: 3 }, station: 'workbench', lvl: 1 },
   { out: { item: 'a545', n: 60 }, cost: { scrap: 4, chemicals: 3 }, station: 'workbench', lvl: 1 },
@@ -216,7 +250,7 @@ export const LOOT_TABLES = {
   medbox:  [['bandage', 1, 3, 8], ['medkit', 1, 2, 5], ['stim', 1, 1, 2], ['chemicals', 2, 4, 5]],
   car:     [['scrap', 5, 10, 8], ['polymer', 2, 6, 6], ['fabric', 2, 5, 5], ['electronics', 1, 2, 4], ['a9', 10, 25, 3], ['chemicals', 1, 3, 3]],
   safe:    [['core', 1, 1, 2], ['cell', 1, 2, 4], ['alloy', 2, 4, 5], ['mod', 1, 1, 5], ['stim', 1, 2, 3], ['vest3', 1, 1, 1], ['pack3', 1, 1, 1]],
-  weapons: [['weapon', 1, 1, 6], ['mod', 1, 1, 6], ['a556', 30, 60, 4], ['a762', 20, 40, 3], ['a762r', 10, 30, 2], ['a50', 7, 14, 1], ['plate', 1, 2, 3]],
+  weapons: [['weapon', 1, 1, 6], ['mod', 1, 1, 6], ['a57', 25, 50, 2], ['a46', 30, 60, 2], ['a50bmg', 3, 8, 1], ['a556', 30, 60, 4], ['a762', 20, 40, 3], ['a762r', 10, 30, 2], ['a50', 7, 14, 1], ['plate', 1, 2, 3]],
   // salvage nodes (hold E to strip)
   n_scrap: [['scrap', 6, 12, 10], ['alloy', 1, 1, 1]],
   n_elec:  [['electronics', 2, 5, 10], ['glass', 1, 2, 3], ['cell', 1, 1, 1]],

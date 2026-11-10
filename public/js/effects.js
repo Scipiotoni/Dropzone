@@ -63,7 +63,7 @@ export class Effects {
     this.add = new ParticleSystem(2500, soft, true); this.norm = new ParticleSystem(1800, smoke, false);
     scene.add(this.add.points, this.norm.points);
     // tracers
-    this.tracers = []; const tg = new THREE.BufferGeometry(); this.tPos = new Float32Array(200 * 6); this.tCol = new Float32Array(200 * 6);
+    this.tracers = []; const tg = new THREE.BufferGeometry(); this.tPos = new Float32Array(600 * 6); this.tCol = new Float32Array(600 * 6); this.streaks = [];
     tg.setAttribute('position', new THREE.BufferAttribute(this.tPos, 3)); tg.setAttribute('color', new THREE.BufferAttribute(this.tCol, 3));
     this.tLines = new THREE.LineSegments(tg, new THREE.LineBasicMaterial({ vertexColors: true, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false }));
     this.tLines.frustumCulled = false; scene.add(this.tLines);
@@ -96,6 +96,8 @@ export class Effects {
     for (let i = 0; i < 3; i++) this.norm.emit({ p, v: dir.clone().multiplyScalar(1 + Math.random() * 2).add(new THREE.Vector3(0, 0.4, 0)), life: 0.7 + Math.random() * 0.5, s0: 0.08, s1: 0.5, c: COLORS.smoke, a0: 0.25, a1: 0, drag: 2.5 });
   }
   tracer(a, b, color = 0xffc070, speed = 380) { const d = b.clone().sub(a); const L = d.length(); if (L < 1) return; this.tracers.push({ a: a.clone(), dir: d.divideScalar(L), L, t: 0, speed, col: new THREE.Color(color) }); if (this.tracers.length > 199) this.tracers.shift(); }
+  // one-frame bullet flight segment (ballistics draws the real trajectory with these)
+  streak(a, b, color = 0xffd080, k = 1) { if (this.streaks.length < 380) this.streaks.push([a.x, a.y, a.z, b.x, b.y, b.z, color, k]); }
   impact(p, n, mat = 'concrete', big = 1) {
     const N = n || new THREE.Vector3(0, 1, 0);
     if (mat === 'flesh') { for (let i = 0; i < 8; i++) this.norm.emit({ p, v: rnd(N, 1.5, 1.2), life: 0.5, s0: 0.12, s1: 0.4, c: COLORS.blood, a0: 0.8, a1: 0, g: 4, drag: 3 }); return; }
@@ -140,6 +142,9 @@ export class Effects {
     for (let i = 0; i < w; i++) { const t = T[i], head = Math.min(t.L, t.t * t.speed), tail = Math.max(0, head - 6);
       const a = t.a, d = t.dir; this.tPos.set([a.x + d.x * tail, a.y + d.y * tail, a.z + d.z * tail, a.x + d.x * head, a.y + d.y * head, a.z + d.z * head], i * 6);
       this.tCol.set([t.col.r * 0.1, t.col.g * 0.1, t.col.b * 0.1, t.col.r * 3, t.col.g * 3, t.col.b * 3], i * 6); }
+    let n = w; const c = new THREE.Color();
+    for (const st of this.streaks) { if (n >= 599) break; c.setHex(st[6]); const k = st[7]; this.tPos.set([st[0], st[1], st[2], st[3], st[4], st[5]], n * 6); this.tCol.set([c.r * 0.3 * k, c.g * 0.3 * k, c.b * 0.3 * k, c.r * 3 * k, c.g * 3 * k, c.b * 3 * k], n * 6); n++; }
+    this.streaks.length = 0; w = n;
     this.tLines.geometry.setDrawRange(0, w * 2); this.tLines.geometry.attributes.position.needsUpdate = true; this.tLines.geometry.attributes.color.needsUpdate = true;
     for (const l of this.lights) { if (l.userData.t > 0) { l.userData.t -= dt; l.intensity = Math.max(0, l.userData.i0 * l.userData.t / l.userData.d); } else l.intensity = 0; }
     this.flashes = this.flashes.filter((f) => { f.t -= dt; if (f.t <= 0) { f.g.parent?.remove(f.g); f.g.children.forEach((c) => c.geometry.dispose()); return false; } return true; });

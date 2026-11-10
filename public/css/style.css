@@ -186,3 +186,6 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 
 body.softlook #game canvas { cursor: none; }
 #softhint { position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); font: 500 12px var(--font); color: var(--dim); pointer-events: none; z-index: 4; }
+
+#bleed { color: var(--red); font: 700 13px var(--font); letter-spacing: 0.08em; animation: pulse 1s infinite alternate; }
+@keyframes pulse { from { opacity: 0.5; } to { opacity: 1; } }

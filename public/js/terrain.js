@@ -1,6 +1,6 @@
 // Heightfield terrain with a 4-layer PBR splat shader (grass / dirt / rock / asphalt) and wind-animated grass.
 import * as THREE from 'three';
-import { TEX } from './textures.js';
+import { TEX, POM } from './textures.js';
 
 export class Terrain {
   /** heightFn(x,z) -> y ; splatFn(x,z,y,slope) -> [grass, dirt, rock, asphalt] */
@@ -87,17 +87,21 @@ function makeSplatMaterial() {
   const m = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
   const T = [TEX.grass, TEX.dirt, TEX.rock, TEX.asphalt];
   m.onBeforeCompile = (sh) => {
+    sh.uniforms.terrPom = { get value() { return POM.value; } };
     ['A', 'B', 'C', 'D'].forEach((k, i) => { sh.uniforms['t' + k] = { value: T[i].map }; sh.uniforms['n' + k] = { value: T[i].normalMap }; });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 splat; varying vec4 vSplat; varying vec3 vWP; varying vec3 vWN;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSplat = splat; vWP = (modelMatrix * vec4(transformed,1.0)).xyz; vWN = normal;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform sampler2D tA, tB, tC, tD, nA, nB, nC, nD; varying vec4 vSplat; varying vec3 vWP; varying vec3 vWN;
+        uniform sampler2D tA, tB, tC, tD, nA, nB, nC, nD; uniform float terrPom; varying vec4 vSplat; varying vec3 vWP; varying vec3 vWN;
         vec4 W; vec2 UV;
         vec3 tri(sampler2D t, vec2 uv) { return texture2D(t, uv).rgb * 0.6 + texture2D(t, uv * 0.27 + 0.37).rgb * 0.4; } // two scales break up tiling`)
       .replace('#include <map_fragment>', `
         UV = vWP.xz / 4.0;
+        { vec3 Vw = normalize(cameraPosition - vWP); vec3 Nw0 = normalize(vWN); vec3 Tw0 = normalize(vec3(1.0, 0.0, 0.0) - Nw0 * Nw0.x); vec3 Bw0 = cross(Tw0, Nw0);
+          vec3 Vt = vec3(dot(Vw, Tw0), -dot(Vw, Bw0), dot(Vw, Nw0)); float hgt = texture2D(nB, UV * 0.8).a * vSplat.y + texture2D(nC, UV * 0.5).a * vSplat.z + texture2D(nA, UV).a * vSplat.x + texture2D(nD, UV * 0.6).a * vSplat.w;
+          UV += Vt.xy / max(Vt.z, 0.3) * (hgt - 0.5) * 0.06 * terrPom; }
         float macro = texture2D(tB, vWP.xz / 180.0).r;
         W = vSplat;
         // height-based blending sharpens the transitions using each layer's albedo as a height proxy

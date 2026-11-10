@@ -11,6 +11,7 @@ import { buildBase, PLOT } from './base.js';
 import { Director } from './ai.js';
 import { Net } from './net.js';
 import { makeHeli, HeliFlight } from './heli.js';
+import { Ballistics } from './ballistics.js';
 import { Vehicle, VEHICLES, ENTER_RANGE } from './vehicles.js';
 import { resetEnemyIds, TYPE_BY_CODE, SHOT_KINDS } from './enemies.js';
 import { LootContainer, Pack, rollLoot, entryName, CONTAINER_INFO } from './loot.js';
@@ -51,7 +52,7 @@ class Game {
     this.settings = { sens: 1, vol: 0.7, quality: 'high', fov: 72, view: 'third', ...(store.get(SET_KEY) || {}) };
     this.engine.baseFov = this.settings.fov; audio.setVolume(this.settings.vol); if (this.settings.quality !== 'high') this.engine.setQuality(this.settings.quality);
     this.mode = 'menu'; this.time = 0; this.enemies = []; this.rockets = []; this.raidLoot = []; this.shakeAmt = 0; this.vehicles = []; this.containers = []; this.myParked = new Set();
-    this.ai = new Director(this); this.net = new Net(this); this.audio = audio;
+    this.ai = new Director(this); this.net = new Net(this); this.audio = audio; this.ballistics = new Ballistics(this);
     this.scene.add(this.engine.camera);
     this.engine.renderer.domElement.addEventListener('click', () => { if (!this.ui.isOpen() && this.mode !== 'menu') { audio.init(); this.input.lock(); } });
   }
@@ -149,7 +150,7 @@ class Game {
   // ------------------------------------------------------------------ worlds
   setWorld(W, kind) {
     for (const w of [this.base, this.hot]) w.root.visible = w === W;
-    this.world = W; this.fx && (this.fx.world = W); this.fx?.clear();
+    this.world = W; this.fx && (this.fx.world = W); this.fx?.clear(); this.ballistics?.clear();
     if (kind === 'hot') this.engine.setAtmosphere({ elevation: 24, azimuth: 235, fog: 0xa8aea8, fogDensity: 0.0034, exposure: 0.85, turbidity: 7 });
     else this.engine.setAtmosphere({ elevation: 9, azimuth: 250, fog: 0xc0a088, fogDensity: 0.004, exposure: 0.95, turbidity: 9 });
   }
@@ -346,7 +347,7 @@ class Game {
   onVehicleDestroyed(v) { if (this.player.vehicle === v) { this.exitVehicle(true); this.player.damage(60, v.pos, 'explosion'); } this.explode(v.pos.clone(), 8, 80, null, false); }
   onNetEvent(type, d, peer, R) {
     const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
-    if (type === 'shot') { const a = V3(d[0], d[1], d[2]), b = V3(d[3], d[4], d[5]); this.fx.tracer(a, b, 0xffd080, 420); this.fx.impact(b, null, 'concrete'); audio.gunshot(R?.ws ? gunSound(R.ws) : 'rifle', a, d[6] ? 0.25 : 1); if (R?.op) R.op.kick = 1; if (R?.anim) R.anim.fire(); }
+    if (type === 'shot') { const a = V3(d[0], d[1], d[2]); this.ballistics.fire(a, V3(d[3], d[4], d[5]), { ammo: d[7] || 'a556', visual: true, mine: false, muzzle: a }); audio.gunshot(R?.ws ? gunSound(R.ws) : 'rifle', a, d[6] ? 0.25 : 1); if (R?.op) R.op.kick = 1; if (R?.anim) R.anim.fire(); }
     else if (type === 'es' && !this.net.isHost) { const a = V3(d[0], d[1], d[2]), b = V3(d[3], d[4], d[5]); this.fx.tracer(a, b, d[7] || 0xffa040, 260); audio.gunshot(SHOT_KINDS[d[6]] || 'rifle', a, 1); }
     else if (type === 'pd') { if (d[0] === this.net.me && this.mode === 'raid') { if (d[5]) this.lastHitPeer = peer; this.player.damage(d[1], V3(d[2], d[3], d[4]), d[5] ? 'player' : 'enemy'); } }
     else if (type === 'eh' && this.net.isHost) { const e = this.enemies.find((x) => x.id === d[0]); if (e && e.alive && !e.puppet) e.damage(d[1], { tag: d[2] }, R?.pos, false, peer); }
@@ -458,6 +459,7 @@ class Game {
     if (this.mode === 'base') { this.base.build.update(dt, this.time); this.idleHeli(dt); for (const v of this.vehicles) v.update(dt, P.vehicle === v && P.seat === 0 ? this.input : null); }
     const cam = this.engine.camera; audio.listener.x = cam.position.x; audio.listener.y = cam.position.y; audio.listener.z = cam.position.z; audio.listener.yaw = -new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ').y * -1;
     this.ai.update(dt);
+    if (this.mode !== 'menu') this.ballistics.update(dt);
     this.fx.update(dt, this.scene.fog);
     if (this.world.terrain.grassTime) this.world.terrain.grassTime.value = this.time;
     this.engine.followSun(this.mode === 'heli' && this.heliRide ? this.heliRide.pos : P.pos);
@@ -486,7 +488,7 @@ class Game {
       if (!this.hcam || this.hcam.distanceTo(want) > 40) this.hcam = want.clone(); this.hcam.lerp(want, 1 - Math.exp(-dt * 6)); cam.position.copy(this.hcam); cam.lookAt(F.pos.clone().setY(F.pos.y + 1.5)); cam.updateMatrixWorld();
       const hovering = F.phase === 'hover';
       this.ui.setRaidInfo(this.zone.name, null, hovering ? 'Press E to fast-rope down' : F.leg === 0 ? `Inbound to ${this.zone.name} · Space to skip` : 'Flaring over the drop point…');
-      if (hovering && (I.hit('KeyE') || (F.hoverT = (F.hoverT || 0) + dt) > 8)) { F.dropped = true; F.ropeT = 0; P.pos.copy(door); P.vel.set(0, 0, 0); audio.mech(P.pos, 'pump'); }
+      if (hovering && (I.hit('KeyE') || (F.hoverT = (F.hoverT || 0) + dt) > 8)) { const door = F.doorWorld(new THREE.Vector3()); F.dropped = true; F.ropeT = 0; P.pos.copy(door); P.vel.set(0, 0, 0); audio.mech(P.pos, 'pump'); }
     } else {
       // fast-rope: slide down the rope from the door to the ground, then take control
       const door = F.doorWorld(new THREE.Vector3()); F.ropeT += dt; const gy = this.hot.col.groundAt(door.x, door.z, door.y).y;
