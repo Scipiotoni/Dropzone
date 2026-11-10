@@ -163,7 +163,7 @@ splat shader. Lighting is a physical sky with image-based lighting, soft shadows
 mapping and colour grading, ground-truth ambient occlusion (GTAO), height fog and a procedural cloud
 layer. Surfaces use height maps for parallax occlusion mapping, plus cavity ambient occlusion and
 roughness/metalness maps. Characters are faceted low-poly with fabric and camo textures, and they
-use two-bone arm IK on the weapon.
+use two-bone arm IK on the weapon and planted-foot leg IK: feet lock to the ground and step to new footholds instead of sliding when you strafe, walk diagonally or turn.
 
 Progress and the AI's profile of you are saved in `localStorage`.
 
