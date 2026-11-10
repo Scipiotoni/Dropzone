@@ -5,7 +5,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { ITEMS, WEAPONS, MODS, RECIPES, PIECES, PIECE_ORDER, RARITY, weaponStats, modFits, DEFAULT_MODS, entryKg, encumbrance } from './items.js';
 import { entryName, entryRarity, entryIcon } from './loot.js';
 import { buildGun } from './guns.js';
-import { DROP_ZONES, EXTRACTS } from './hotzone.js';
+import { DROP_ZONES, EXTRACTS, MAP_SIZE } from './hotzone.js';
 import { audio } from './audio.js';
 
 const $ = (s) => document.querySelector(s);
@@ -184,7 +184,7 @@ export class UI {
     this.preview = { dispose: () => { cancelAnimationFrame(raf); r.dispose(); pm.dispose(); } };
   }
   // ------------------------------------------------------------------ maps
-  mapHTML(markers) { return `<div class="map" id="map"><canvas width="640" height="640"></canvas>${markers.map((m) => `<div class="mk ${m.cls || ''}" data-id="${m.id || ''}" style="left:${(m.x + 320) / 640 * 100}%;top:${(m.z + 320) / 640 * 100}%"><i></i>${m.label || ''}</div>`).join('')}</div>`; }
+  mapHTML(markers) { return `<div class="map" id="map"><canvas width="640" height="640"></canvas>${markers.map((m) => `<div class="mk ${m.cls || ''}" data-id="${m.id || ''}" style="left:${(m.x + MAP_SIZE / 2) / MAP_SIZE * 100}%;top:${(m.z + MAP_SIZE / 2) / MAP_SIZE * 100}%"><i></i>${m.label || ''}</div>`).join('')}</div>`; }
   paintMap(canvas) { const src = this.g.mapImage; if (src) canvas.getContext('2d').drawImage(src, 0, 0); }
   launch() {
     const G = this.g; let sel = G.lastZone || 'quarter';
@@ -231,7 +231,7 @@ export class UI {
   }
   settingsHTML() { const s = this.g.settings; return `<div class="settings"><label>Mouse sensitivity</label><input type="range" id="sens" min="0.3" max="3" step="0.05" value="${s.sens}"><label>Volume</label><input type="range" id="vol" min="0" max="1" step="0.05" value="${s.vol}"><label>Graphics</label><select id="qual"><option value="ultra" ${s.quality === 'ultra' ? 'selected' : ''}>Ultra (AO, 2× res)</option><option value="high" ${s.quality === 'high' ? 'selected' : ''}>High (ambient occlusion)</option><option value="medium" ${s.quality === 'medium' ? 'selected' : ''}>Medium</option><option value="low" ${s.quality === 'low' ? 'selected' : ''}>Performance</option></select><label>Field of view</label><input type="range" id="fov" min="60" max="95" step="1" value="${s.fov}"><label>Camera</label><select id="view"><option value="third" ${s.view !== 'first' ? 'selected' : ''}>Third person (over the shoulder)</option><option value="first" ${s.view === 'first' ? 'selected' : ''}>First person</option></select></div>`; }
   bindSettings(p) { const G = this.g; p.querySelector('#sens').oninput = (e) => { G.settings.sens = +e.target.value; G.saveSettings(); }; p.querySelector('#vol').oninput = (e) => { G.settings.vol = +e.target.value; audio.setVolume(G.settings.vol); G.saveSettings(); }; p.querySelector('#qual').onchange = (e) => { G.settings.quality = e.target.value; G.engine.setQuality(G.settings.quality); G.saveSettings(); }; p.querySelector('#fov').oninput = (e) => { G.settings.fov = +e.target.value; G.engine.baseFov = G.settings.fov; G.saveSettings(); }; p.querySelector('#view').onchange = (e) => { G.settings.view = e.target.value; if (G.player) G.player.fp = e.target.value === 'first'; G.saveSettings(); }; }
-  keysHTML() { return [['WASD', 'Move'], ['Shift', 'Sprint'], ['C', 'Crouch'], ['Space', 'Jump'], ['LMB / RMB', 'Fire / Aim'], ['R', 'Reload'], ['1 / 2 · Wheel', 'Switch weapon'], ['E (hold)', 'Interact / loot / salvage'], ['Q', 'Heal'], ['G', 'Insert armor plate'], ['Tab', 'Inventory'], ['M', 'Map'], ['V', 'First / third person'], ['L', 'Weapon light'], ['I', 'Inspect weapon'], ['X', 'Fire selector (semi / burst / auto)'], ['PgUp / PgDn', 'Scope zeroing (100–800 m)'], ['Shift (aiming)', 'Hold breath (scopes)'], ['E near vehicle', 'Drive / ride · W/S/A/D, Space handbrake, R flip'], ['B', 'Build mode (base)']].map(([k, v]) => `<kbd>${k}</kbd><span>${v}</span>`).join(''); }
+  keysHTML() { return [['WASD', 'Move'], ['Shift', 'Sprint'], ['C', 'Crouch'], ['Space', 'Jump'], ['LMB / RMB', 'Fire / Aim'], ['R', 'Reload'], ['1 / 2 · Wheel', 'Switch weapon'], ['E (hold)', 'Interact / loot / salvage'], ['Q', 'Heal'], ['G', 'Insert armor plate'], ['Tab', 'Inventory'], ['M', 'Map'], ['V', 'First / third person'], ['L', 'Weapon light'], ['I', 'Inspect weapon'], ['X', 'Fire selector (semi / burst / auto)'], ['PgUp / PgDn', 'Scope zeroing (100–800 m)'], ['Shift (aiming)', 'Hold breath (scopes)'], ['E near vehicle', 'Drive / ride · W/S/A/D, Space handbrake, R flip'], ['T', 'Team: invite, join, shared base'], ['1–6 in a vehicle', 'Switch seat (gunner seat fires the .50 cal)'], ['B', 'Build mode (base)']].map(([k, v]) => `<kbd>${k}</kbd><span>${v}</span>`).join(''); }
   menu(hasSave) {
     const m = $('#menu'); m.classList.remove('hidden');
     m.innerHTML = `<div class="mm"><div class="logo">DROP<span>ZONE</span></div><div class="tag">Drop into the Ashgrove hotzone. Strip it for salvage. Fight off machines and raiders. Extract alive and build up Haven.</div>
@@ -251,6 +251,27 @@ export class UI {
     const lo = Math.max(0, Math.min(PIECE_ORDER.length - 9, sel - 4));
     bb.innerHTML = PIECE_ORDER.map((k, i) => { if (i < lo || i >= lo + 9) return ''; const P = PIECES[k]; const aff = Object.entries(P.cost).every(([r, n]) => this.g.stashCount(r) >= n); return `<div class="bp ${i === sel ? 'on' : ''} ${aff ? '' : 'no'}"><b>${i < 9 ? i + 1 : i === 9 ? 0 : ''}</b> ${P.name}<small>${Object.entries(P.cost).filter(([, n]) => n > 0).map(([r, n]) => `${n} ${ITEMS[r].name.split(' ')[0]}`).join(' · ')}</small></div>`; }).join('');
   }
+  team() {
+    const G = this.g, N = G.net;
+    const render = () => {
+      const online = N.playersOnline().filter((p) => !p.me); const mates = online.filter((p) => p.team); const others = online.filter((p) => !p.team); const inv = N.pendingInvites();
+      const html = `<div class="win" style="width:min(720px,94vw)"><header><h2>Team</h2><span class="sub">Teammates share your Haven and drop into the same raids. Friendly fire is on.</span><button class="ghost x" data-close>Close [T]</button></header>
+        <div class="body" style="flex-direction:column">
+          <div class="summary"><div class="eq"><label>Team code</label><div class="v" style="font-family:var(--mono);font-size:20px">${esc(N.team)}</div></div><div class="eq"><label>Base</label><div class="v">${N.isLeader ? 'Your Haven (you lead)' : 'Shared Haven of the team leader'}</div></div><div class="eq"><label>Online</label><div class="v">${N.online ? online.length + 1 + ' operators' : 'Offline'}</div></div></div>
+          ${inv.map((i, k) => `<div class="eq"><div class="v"><span style="color:${i.color}">${esc(i.from)}</span> invited you to team ${esc(i.code)}</div><button data-acc="${k}">Accept</button></div>`).join('')}
+          <h3 style="margin:4px 0 0;color:var(--dim);letter-spacing:.14em;font-size:14px">TEAMMATES</h3>${mates.map((p) => `<div class="eq"><div class="v" style="color:#6fdf5a">◆ ${esc(p.name)}${p.leader ? ' · leader' : ''}<small>${p.mode === 'raid' || p.mode === 'heli' ? 'in a raid' : p.mode === 'base' ? 'at Haven' : 'in the menu'}</small></div></div>`).join('') || '<div style="color:var(--dim)">Nobody yet. Invite someone below or share your team code.</div>'}
+          <h3 style="margin:4px 0 0;color:var(--dim);letter-spacing:.14em;font-size:14px">OTHER OPERATORS ONLINE</h3>${others.map((p) => `<div class="eq"><div class="v"><span style="color:${p.color}">${esc(p.name)}</span><small>${p.mode === 'raid' ? 'in a raid' : p.mode === 'base' ? 'at Haven' : ''}</small></div><button class="ghost" data-inv="${p.peer}">${N.invites[p.peer] ? 'Invited' : 'Invite'}</button></div>`).join('') || `<div style="color:var(--dim)">${N.online ? 'No one else is online right now.' : 'Multiplayer is offline in this view.'}</div>`}
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input id="tcode" maxlength="8" placeholder="Friend's team code" style="background:#111;color:var(--txt);border:1px solid var(--line2);padding:9px 10px;font:600 15px var(--mono);text-transform:uppercase"><button id="tjoin">Join team</button>${N.isLeader ? '' : '<button id="tleave" class="ghost">Leave team</button>'}</div>
+        </div></div>`;
+      const p = this.panel(html); this.open = 'team';
+      p.querySelector('[data-close]').onclick = () => this.close();
+      p.querySelectorAll('[data-inv]').forEach((b) => b.onclick = () => { N.invite(b.dataset.inv); render(); });
+      p.querySelectorAll('[data-acc]').forEach((b) => b.onclick = () => { N.setTeam(inv[+b.dataset.acc].code); this.toast('Joined team ' + N.team); render(); });
+      p.querySelector('#tjoin').onclick = () => { const v = p.querySelector('#tcode').value.trim(); if (v) { N.setTeam(v); this.toast('Joined team ' + N.team); render(); } };
+      p.querySelector('#tleave')?.addEventListener('click', () => { N.setTeam(N.myCode); this.toast('You left the team'); render(); });
+    };
+    render();
+  }
   intel(lines) {
     const G = this.g; const p = G.ai.profile;
     this.panel(`<div class="win" style="width:min(760px,94vw)"><header><h2>Threat Intel</h2><span class="sub">What Ashgrove's hostiles have learned about how you fight.</span><button class="ghost x" data-close>Close</button></header>
@@ -260,8 +281,8 @@ export class UI {
   vehicleHud(v) {
     let el = $('#vehhud'); if (!el) { el = document.createElement('div'); el.id = 'vehhud'; $('#hud').appendChild(el); }
     if (!v) { el.classList.add('hidden'); $('#weaponhud').classList.remove('hidden'); return; }
-    el.classList.remove('hidden'); if (v.seat === 0) $('#weaponhud').classList.add('hidden');
-    el.innerHTML = `<div class="vname">${esc(v.name)}${v.seat ? ' · passenger' : ''}</div><div class="spd">${Math.round(v.speed * 3.6)}<small>km/h</small></div><div class="row"><label>HULL</label><div class="bar"><i class="hp" style="transform:scaleX(${Math.max(0, v.hp / v.maxHp)})"></i></div></div><div class="row"><label>FUEL</label><div class="bar"><i class="st" style="transform:scaleX(${v.fuel})"></i></div></div><div class="vk">W/S throttle · A/D steer · Space handbrake · V camera · E exit</div>`;
+    el.classList.remove('hidden'); $('#weaponhud').classList.toggle('hidden', v.seat === 0 || !!v.gun);
+    el.innerHTML = `<div class="vname">${esc(v.name)}${v.gun ? ' · gunner' : v.seat ? ' · passenger' : ''}</div><div class="spd">${Math.round(v.speed * 3.6)}<small>km/h</small></div><div class="row"><label>HULL</label><div class="bar"><i class="hp" style="transform:scaleX(${Math.max(0, v.hp / v.maxHp)})"></i></div></div><div class="row"><label>FUEL</label><div class="bar"><i class="st" style="transform:scaleX(${v.fuel})"></i></div></div>${v.gun ? `<div class="row"><label>HEAT</label><div class="bar"><i class="hp ${v.gun.over ? 'low' : ''}" style="transform:scaleX(${Math.min(1, v.gun.heat)})"></i></div></div>${v.gun.over ? '<div class="vk warn">BARREL OVERHEATED</div>' : ''}` : ''}<div class="vk">W/S throttle · A/D steer · Space handbrake · V camera · E exit</div>`;
   }
   updateOnline() {
     const G = this.g; let el = $('#online'); if (!el) { el = document.createElement('div'); el.id = 'online'; document.body.appendChild(el); }

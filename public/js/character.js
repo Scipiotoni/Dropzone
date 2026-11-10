@@ -152,6 +152,54 @@ export class Operator {
     gm.group.position.copy(gm.grip).multiplyScalar(-1);
     this.gunSlot.add(gm.group);
   }
+  footIK(dt, st, B) {
+    const root = this.root; root.updateMatrixWorld(true);
+    const yaw = root.rotation.y, fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
+    const vx = st.vx || 0, vz = st.vz || 0, spd = Math.hypot(vx, vz);
+    const stepT = THREE.MathUtils.clamp(0.4 - spd * 0.04, 0.17, 0.4), lead = stepT * 0.75;
+    const P = root.position;
+    if (!this.feet || this.feet[0].pos.distanceTo(P) > 2.5) this.feet = [-1, 1].map((sx) => { const p = new THREE.Vector3(P.x + rx * sx * 0.12, 0, P.z + rz * sx * 0.12); p.y = st.ground(p.x, p.z); return { sx, pos: p, from: p.clone(), to: p.clone(), t: 1, yaw }; });
+    const F = this.feet;
+    // where each foot wants to be: under its hip, ahead along the velocity, a little wider when strafing
+    const want = (sx) => { const side = 0.12 + Math.abs(st.side || 0) * 0.03 + B.crouch * 0.05; const x = P.x + rx * sx * side + vx * lead, z = P.z + rz * sx * side + vz * lead; return _f1.set(x, st.ground(x, z), z); };
+    for (const f of F) { // advance in-flight steps
+      if (f.t < 1) { f.t = Math.min(1, f.t + dt / stepT); const k = f.t * f.t * (3 - 2 * f.t); f.pos.lerpVectors(f.from, f.to, k); f.pos.y += Math.sin(f.t * Math.PI) * (0.08 + Math.min(0.12, spd * 0.02)); if (f.t >= 1 && st.onStep) st.onStep(f.pos); }
+    }
+    // a planted foot may lift once the other foot is past mid-stride (or immediately if it is out of reach)
+    const legReach = 0.43 + 0.41 + 0.05;
+    for (const f of F) {
+      if (f.t < 1) continue; const other = F[0] === f ? F[1] : F[0];
+      const w = want(f.sx); const d = Math.hypot(w.x - f.pos.x, w.z - f.pos.z); let dy = yaw - f.yaw; dy = Math.abs(Math.atan2(Math.sin(dy), Math.cos(dy)));
+      const hip = this.hips.localToWorld(_f3.set(f.sx * 0.085, -0.05, 0)); const over = hip.distanceTo(f.pos) > legReach + 0.12;
+      const thresh = 0.14 + Math.min(0.18, spd * 0.035);
+      if ((over || (d + dy * 0.25 > thresh && other.t > 0.55 && f !== this.lastStep) || d > thresh * 2.5) && (other.t > 0.55 || over)) {
+        f.from.copy(f.pos); f.to.copy(w).addScaledVector(_f2.set(vx, 0, vz), lead * 0.7); f.to.y = st.ground(f.to.x, f.to.z); f.t = 0; f.yaw = yaw; this.lastStep = f;
+      }
+    }
+    // hips drop to keep both feet reachable; then solve each leg
+    const legLen = 0.43 + 0.41 + 0.07;
+    let drop = 0; for (const f of F) { const hip = this.hips.localToWorld(_f3.set(f.sx * 0.085, -0.05, 0)); const d = hip.distanceTo(f.pos); if (d > legLen * 0.97) drop = Math.max(drop, d - legLen * 0.97); }
+    this.hips.position.y -= Math.min(0.25, drop); this.hips.position.x = 0;
+    this.root.updateMatrixWorld(true);
+    _m2.copy(this.hips.matrixWorld).invert();
+    for (const f of F) {
+      const L = f.sx < 0 ? this.lL : this.lR;
+      const tgt = _f1.copy(f.pos).setY(f.pos.y + 0.075).applyMatrix4(_m2);
+      this.legIK(L, tgt);
+    }
+  }
+  legIK(L, target) {
+    const S = L.hp.position, a = 0.43, b = 0.41;
+    const d = _v1.copy(target).sub(S); let len = d.length(); len = Math.min(Math.max(len, 0.15), a + b - 0.001); d.normalize();
+    const ang = Math.acos(THREE.MathUtils.clamp((a * a + len * len - b * b) / (2 * a * len), -1, 1));
+    const pole = _v7.set(0, 0, -1); const side = _v2.copy(pole).sub(_v3.copy(d).multiplyScalar(pole.dot(d))).normalize();
+    const kneeDir = _v4.copy(d).multiplyScalar(Math.cos(ang)).addScaledVector(side, Math.sin(ang));
+    const K = _v5.copy(S).addScaledVector(kneeDir, a);
+    L.hp.quaternion.setFromUnitVectors(DOWN, kneeDir);
+    const lower = _v6.copy(S).addScaledVector(d, len).sub(K).normalize();
+    _q1.setFromUnitVectors(DOWN, lower); _q2.copy(L.hp.quaternion).invert(); L.kn.quaternion.copy(_q2).multiply(_q1);
+    _q3.copy(L.hp.quaternion).multiply(L.kn.quaternion).invert(); L.an.quaternion.copy(_q3); // keep the boot flat and facing forward
+  }
   // two-bone IK: point the shoulder->elbow->wrist chain at a target (in chest space)
   ik(arm, target, pole) {
     const S = arm.sh.position, a = UP_LEN, b = LO_LEN + 0.06;
@@ -199,6 +247,10 @@ export class Operator {
     this.hips.position.x = Math.sin(ph) * amp * 0.025;
     this.hips.rotation.y = Math.sin(ph) * amp * 0.14 + side * 0.25 * amp;
     this.hips.rotation.z = Math.cos(ph) * amp * 0.04;
+    // planted-foot IK: feet stay locked to the ground and step to new footholds (no sliding when strafing,
+    // walking diagonally or turning on the spot)
+    if (st.ground && !st.dead && !this.dead && B.air < 0.5 && B.seat < 0.5 && !st.noIK) this.footIK(dt, st, B);
+    else this.feet = null;
     // ---- torso: lean into sprint / strafe, bend for pitch, breathing, hit flinch
     const pitch = st.pitch || 0; const fl = this.flinchT * this.flinchT;
     const spX = -B.sprint * 0.32 - B.crouch * 0.25 + pitch * 0.2 - squat * 0.2 + fl * 0.25 + back * 0.05, chX = pitch * 0.3 + breathe;
@@ -247,4 +299,5 @@ const _w3 = new THREE.Vector3();
 const DOWN = new THREE.Vector3(0, -1, 0);
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3(), _v5 = new THREE.Vector3(), _v6 = new THREE.Vector3(), _v7 = new THREE.Vector3();
 const _w1 = new THREE.Vector3(), _w2 = new THREE.Vector3(), _pole = new THREE.Vector3();
-const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _m1 = new THREE.Matrix4();
+const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion(), _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4();
+const _f1 = new THREE.Vector3(), _f2 = new THREE.Vector3(), _f3 = new THREE.Vector3();

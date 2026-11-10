@@ -1,6 +1,6 @@
 # Dropzone
 
-A browser extraction shooter built with three.js. Drop into the **Ashgrove hotzone** in a drop pod,
+A browser extraction shooter built with three.js. Drop into the 1 km² **Ashgrove hotzone** (12 districts, 6 extraction LZs) in a drop pod,
 strip it for salvage, fight machines and raiders, then make it to an active landing zone and call
 the lift before the storm hits. Everything you carry in is lost if you die. What you extract goes
 into your stash at **Haven**, your base, where you build structures, craft weapons and fit attachments.
@@ -13,6 +13,10 @@ npm start
 ```
 
 Then open http://localhost:3000. Click the game to capture the mouse.
+
+## Teams and shared bases
+
+Press T for the team panel. You can invite anyone who is online or join a friend's team code. Teammates share the team leader's Haven: you walk around it together, build on it (each builder pays from their own stash) and use its benches. You also drop into the same raid session. Teammates get green tags and compass markers. Friendly fire is on.
 
 ## Multiplayer
 
@@ -82,7 +86,8 @@ The **Threat Intel** terminal at Haven shows what they have learned.
 
 ## Vehicles
 
-There are four military vehicles in the hotzone: the M1151 HMMWV, an MRAP 4×4, an M35 cargo truck and a military UTV.
+There are 30 vehicles of eight types across the hotzone: the M1151 HMMWV, Stryker ICV 8×8, MRAP 4×4, M35 cargo truck, a technical with a mounted M2 .50 cal, a military UTV, an ATV quad and civilian SUVs.
+The Humvee turret, the technical's bed gun and the Stryker's remote weapon station are usable: switch seats with 1–6. They fire .50 BMG through the ballistics model, and the barrel overheats if you hold the trigger too long.
 They use the Odyssey Rush driving model, with the same controls (W/S, A/D, Space handbrake, V camera,
 E enter/exit, R flip). Passengers can shoot. Armour soaks up incoming fire, vehicles take crash
 damage and explode, and you can run hostiles down.

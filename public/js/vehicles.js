@@ -21,7 +21,19 @@ function vehicle(v) {
 export const VEHICLES = {
   ltv: vehicle({ name: 'M1151 HMMWV', mass: 2650, hp: 1400, armor: 0.45, fuelCap: 95, fuelUse: 0.09,
     half: [1.1, 0.85, 2.4], com: [0, -0.45, 0.1], track: 0.92, axles: [1.6, -1.6], arch: 0.42, wheelR: 0.47, rest: 0.55, engine: 14500, maxSpeed: 31, steer: 0.55, brake: 26000, offroad: 1.35,
-    seats: [[-0.45, 0.0, 0.25], [0.45, 0.0, 0.25], [-0.45, 0.05, -0.75], [0.45, 0.05, -0.75], [0, 0.8, -0.3]], style: 'ltv' }),
+    seats: [[-0.45, 0.0, 0.25], [0.45, 0.0, 0.25], [-0.45, 0.05, -0.75], [0.45, 0.05, -0.75], [0, 0.8, -0.3]], gunSeat: 4, gunPos: [0, 1.45, 0.2], style: 'ltv' }),
+  stryker: vehicle({ name: 'Stryker ICV 8×8', mass: 17000, hp: 5200, armor: 0.8, fuelCap: 300, fuelUse: 0.3,
+    half: [1.35, 1.2, 3.5], com: [0, -0.5, 0], track: 1.15, axles: [2.5, 1.2, -1.0, -2.3], arch: 0.4, wheelR: 0.58, rest: 0.55, engine: 78000, maxSpeed: 27, steer: 0.4, brake: 170000, offroad: 1.3,
+    seats: [[-0.55, 0.3, 2.3], [0.55, 0.9, 0.6], [-0.6, 0.2, -0.6], [0.6, 0.2, -0.6], [-0.6, 0.2, -1.8], [0.6, 0.2, -1.8]], gunSeat: 1, gunPos: [0.3, 1.75, 0.6], style: 'stryker' }),
+  technical: vehicle({ name: 'Technical (M2 .50 cal)', mass: 1900, hp: 900, armor: 0.15, fuelCap: 80, fuelUse: 0.07,
+    half: [0.95, 0.8, 2.6], com: [0, -0.35, 0.3], track: 0.82, axles: [1.65, -1.55], arch: 0.42, wheelR: 0.43, rest: 0.55, engine: 11500, maxSpeed: 33, steer: 0.55, brake: 18000, offroad: 1.25,
+    seats: [[-0.42, 0.0, 0.55], [0.42, 0.0, 0.55], [0, 0.55, -1.4]], gunSeat: 2, gunPos: [0, 1.75, -1.05], style: 'technical' }),
+  quad: vehicle({ name: 'ATV Quad', mass: 360, hp: 300, armor: 0.0, fuelCap: 30, fuelUse: 0.04,
+    half: [0.6, 0.4, 1.0], com: [0, -0.15, 0], track: 0.6, axles: [0.72, -0.72], arch: 0.2, awd: false, wheelR: 0.34, rest: 0.4, engine: 2600, maxSpeed: 24, steer: 0.62, brake: 3600, offroad: 1.2,
+    seats: [[0, 0.12, -0.15]], style: 'quad' }),
+  suv: vehicle({ name: 'Civilian SUV', mass: 2100, hp: 800, armor: 0.1, fuelCap: 80, fuelUse: 0.08,
+    half: [0.95, 0.85, 2.35], com: [0, -0.35, 0], track: 0.82, axles: [1.45, -1.45], arch: 0.42, wheelR: 0.42, rest: 0.5, engine: 12500, maxSpeed: 36, steer: 0.55, brake: 20000, offroad: 1.0,
+    seats: [[-0.42, 0.05, 0.3], [0.42, 0.05, 0.3], [-0.42, 0.05, -0.75], [0.42, 0.05, -0.75]], style: 'suv' }),
   mrap: vehicle({ name: 'MRAP 4×4', mass: 14500, hp: 4200, armor: 0.75, fuelCap: 300, fuelUse: 0.25,
     half: [1.25, 1.35, 3.1], com: [0, -0.6, 0.2], track: 1.05, axles: [2.0, -1.9], arch: 0.4, wheelR: 0.62, rest: 0.6, engine: 62000, maxSpeed: 26, steer: 0.48, brake: 140000, offroad: 1.25,
     seats: [[-0.5, 0.35, 1.4], [0.5, 0.35, 1.4], [-0.55, 0.3, 0.0], [0.55, 0.3, 0.0], [-0.55, 0.3, -1.1], [0.55, 0.3, -1.1]], style: 'mrap' }),
@@ -213,6 +225,34 @@ export function makeVehicleModel(type, variant = 0) {
     const canvasMat = M.canvas.clone(); canvasMat.side = THREE.DoubleSide; add(cv, canvasMat, 0, 0.25, -1.2);
     for (const sx of [-1, 1]) { add(boxGeo(0.25, 0.14, 0.06), M.head, sx * 0.7, -0.05, 3.67); add(boxGeo(0.14, 0.14, 0.05), M.tail, sx * 1.0, -0.4, -3.44); add(cylGeo(0.25, 0.25, 0.7, 14).rotateX(Math.PI / 2), M.steel, sx * 1.0, -0.55, 0.5); }
     add(cylGeo(0.06, 0.06, 1.2, 8), M.steel, 0.95, 1.0, 1.0);                                 // exhaust stack
+  } else if (type === 'stryker') {
+    add(boxGeo(2.7, 1.3, 6.6, 2), paint, 0, -0.05, 0);                                       // hull
+    add(boxGeo(2.6, 0.6, 1.4, 2), paint, 0, -0.25, 3.3, 0.5);                                 // sloped glacis
+    add(boxGeo(2.5, 0.25, 6.4, 2), paint, 0, 0.72, -0.1);                                     // roof
+    for (const sx of [-1, 1]) { add(boxGeo(0.1, 0.9, 6.2), M.steel, sx * 1.38, -0.05, -0.05); for (let i = 0; i < 9; i++) add(boxGeo(0.12, 0.35, 0.5), M.machineDark, sx * 1.42, 0.3, -2.8 + i * 0.7); } // slat armour + stowage
+    add(boxGeo(0.7, 0.35, 0.5), M.glassDark, -0.75, 0.6, 2.75, -0.5);                         // driver's vision block
+    const rws = new THREE.Group(); rws.position.set(0.3, 1.0, 0.6); body.add(rws); g.userData.turret = rws;
+    add(boxGeo(0.7, 0.5, 0.8, 2), M.machineDark, 0, 0.25, 0, 0, 0, 0, rws); add(cylGeo(0.05, 0.045, 1.4, 10).rotateX(Math.PI / 2), M.steel, 0, 0.35, 0.95, 0, 0, 0, rws); add(boxGeo(0.25, 0.25, 0.3), M.glassDark, 0.3, 0.45, 0.2, 0, 0, 0, rws);
+    add(boxGeo(1.6, 1.0, 0.1), paint, 0, -0.05, -3.32); for (const sx of [-1, 1]) { add(boxGeo(0.25, 0.12, 0.06), M.head, sx * 1.0, 0.25, 3.5); add(boxGeo(0.14, 0.14, 0.05), M.tail, sx * 1.2, 0.1, -3.33); }
+    for (let i = 0; i < 4; i++) add(cylGeo(0.012, 0.008, 2.4, 4), M.steel, -1.1 + i * 0.1, 2.0, -3.0, 0.1 * i, 0, 0);  // antennas
+  } else if (type === 'technical') {
+    const pm = [M.white, M.red, M.blue][variant % 3];
+    add(boxGeo(1.9, 0.55, 5.1, 1.5), pm, 0, -0.25, 0); add(boxGeo(1.85, 0.22, 1.4, 1.5), pm, 0, 0.12, 1.85, -0.06);
+    add(boxGeo(1.85, 0.75, 1.5, 1.5), pm, 0, 0.45, 0.6); add(boxGeo(1.75, 0.45, 0.05), M.glassDark, 0, 0.55, 1.36, -0.4); for (const sx of [-1, 1]) add(boxGeo(0.05, 0.38, 1.1), M.glassDark, sx * 0.93, 0.52, 0.6);
+    add(boxGeo(1.9, 0.08, 2.2), M.rust, 0, 0.05, -1.4); for (const sx of [-1, 1]) add(boxGeo(0.06, 0.45, 2.2), pm, sx * 0.93, 0.25, -1.4); add(boxGeo(1.9, 0.45, 0.06), pm, 0, 0.25, -2.52);
+    add(cylGeo(0.04, 0.04, 0.9, 6), M.steel, 0, 0.55, -1.05); add(boxGeo(0.55, 0.22, 0.6), M.steel, 0, 1.05, -1.05); add(cylGeo(0.035, 0.03, 1.35, 8).rotateX(Math.PI / 2), M.steel, 0, 1.1, -0.2); add(boxGeo(0.7, 0.45, 0.05), M.steel, 0, 1.2, -0.6);
+    for (const sx of [-1, 1]) add(boxGeo(0.25, 0.12, 0.05), M.head, sx * 0.65, 0.0, 2.56); add(boxGeo(2.0, 0.16, 0.16), M.steel, 0, -0.45, 2.6);
+    for (let i = 0; i < 3; i++) add(boxGeo(0.5, 0.3, 0.35), M.green, -0.5 + i * 0.5, 0.25, -2.1);
+  } else if (type === 'quad') {
+    add(boxGeo(0.9, 0.3, 1.6, 1), paint, 0, -0.05, 0); add(boxGeo(0.95, 0.12, 0.6, 1), paint, 0, 0.22, 0.6); add(boxGeo(0.95, 0.12, 0.6, 1), paint, 0, 0.22, -0.65);
+    add(boxGeo(0.4, 0.15, 0.6), M.rubber, 0, 0.25, -0.1); add(cylGeo(0.02, 0.02, 0.8, 6).rotateZ(Math.PI / 2), M.steel, 0, 0.6, 0.55); add(cylGeo(0.03, 0.03, 0.4, 6), M.steel, 0, 0.42, 0.55, -0.3);
+    for (const sx of [-1, 1]) add(boxGeo(0.12, 0.08, 0.05), M.head, sx * 0.25, 0.25, 0.92); add(boxGeo(0.7, 0.15, 0.35), M.green, 0, 0.36, -0.75);
+  } else if (type === 'suv') {
+    const pm = [M.white, M.red, M.blue, M.green, M.yellow][variant % 5];
+    add(boxGeo(1.9, 0.7, 4.7, 1.5), pm, 0, -0.15, 0); add(boxGeo(1.85, 0.75, 3.0, 1.5), pm, 0, 0.55, -0.45); add(boxGeo(1.9, 0.12, 1.4, 1.5), pm, 0, 0.22, 1.7, -0.08);
+    add(boxGeo(1.75, 0.55, 0.05), M.glassDark, 0, 0.62, 1.07, -0.5); add(boxGeo(1.7, 0.45, 0.05), M.glassDark, 0, 0.62, -1.96);
+    for (const sx of [-1, 1]) { add(boxGeo(0.05, 0.45, 2.6), M.glassDark, sx * 0.93, 0.62, -0.45); add(boxGeo(0.25, 0.12, 0.05), M.head, sx * 0.65, 0.05, 2.36); add(boxGeo(0.12, 0.2, 0.05), M.tail, sx * 0.85, 0.2, -2.36); }
+    add(boxGeo(1.6, 0.06, 2.4), M.steel, 0, 0.96, -0.45); for (const sx of [-0.6, 0.6]) add(boxGeo(0.06, 0.06, 2.4), M.steel, sx, 1.0, -0.45);
   } else if (type === 'utv') {
     add(boxGeo(1.5, 0.35, 2.9, 1.2), paint, 0, -0.2, 0); add(boxGeo(1.4, 0.3, 0.8, 1.2), paint, 0, 0.05, 1.05, -0.1);
     for (const sx of [-1, 1]) { add(cylGeo(0.035, 0.035, 1.2, 8), M.steel, sx * 0.68, 0.55, 0.45, 0.25, 0, 0); add(cylGeo(0.035, 0.035, 1.2, 8), M.steel, sx * 0.68, 0.55, -0.55, -0.2, 0, 0); add(cylGeo(0.035, 0.035, 1.1, 8).rotateX(Math.PI / 2), M.steel, sx * 0.68, 1.12, -0.05); }
@@ -224,6 +264,7 @@ export function makeVehicleModel(type, variant = 0) {
   }
   // wheels: pivot (steer + suspension) -> spin group with tyre, rim and lug detail
   const wheels = [];
+  if (def.gunPos) { const mz = new THREE.Object3D(); mz.position.set(def.gunPos[0], def.gunPos[1], def.gunPos[2] + 0.9); body.add(mz); g.userData.gunMuzzle = mz; }
   for (const w of def.wheels) {
     const pivot = new THREE.Group(); pivot.position.set(w[0], w[1] - def.rest * 0.65, w[2]); g.add(pivot);
     const spin = new THREE.Group(); pivot.add(spin);
@@ -235,7 +276,7 @@ export function makeVehicleModel(type, variant = 0) {
     for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; const b = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, Wd * 1.1, 6).rotateZ(Math.PI / 2), M.steel); b.position.set(0, Math.cos(a) * W * 0.36, Math.sin(a) * W * 0.36); spin.add(b); }
     wheels.push({ pivot, spin, def: w });
   }
-  g.userData = { wheels, body, paint };
+  Object.assign(g.userData, { wheels, body, paint });
   const hl = new THREE.SpotLight(0xfff2d8, 0, 50, 0.6, 0.5, 1.4); hl.position.set(0, 0.2, hz); hl.target.position.set(0, -1, hz + 10); g.add(hl, hl.target); g.userData.headlight = hl;
   return g;
 }

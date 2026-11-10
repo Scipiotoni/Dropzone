@@ -378,7 +378,9 @@ export class Raider extends Enemy {
   }
   animate(dt, spd, crouch, aim) {
     const pose = this.anim.update(dt); this.anim.apply(this.gun);
-    this.op.update(dt, { speed: spd, fwd: 1, side: 0, crouch, aim, pitch: this.pitch, gunPose: pose.gun, lh: this.anim.handTarget(this.gun, pose.lh, 'l', _lh), rh: pose.rh ? this.anim.handTarget(this.gun, pose.rh, 'r', _rh) : null, flinch: this.flinch, sprint: spd > 4 && !aim });
+    const vx = (this.pos.x - (this.lastX ?? this.pos.x)) / Math.max(dt, 1e-3), vz = (this.pos.z - (this.lastZ ?? this.pos.z)) / Math.max(dt, 1e-3); this.lastX = this.pos.x; this.lastZ = this.pos.z;
+    const lv = vx * Math.cos(this.yaw) - vz * Math.sin(this.yaw), fv = -vx * Math.sin(this.yaw) - vz * Math.cos(this.yaw);
+    this.op.update(dt, { speed: spd, fwd: fv < -0.3 ? -1 : 1, side: THREE.MathUtils.clamp(lv / 3, -1, 1), vx, vz, ground: this.groundFn || (this.groundFn = (x, z) => this.game.world.col.groundAt(x, z, this.pos.y + 0.6).y), crouch, aim, pitch: this.pitch, gunPose: pose.gun, lh: this.anim.handTarget(this.gun, pose.lh, 'l', _lh), rh: pose.rh ? this.anim.handTarget(this.gun, pose.rh, 'r', _rh) : null, flinch: this.flinch, sprint: spd > 4 && !aim });
     this.flinch = false;
   }
   update(dt, t) {

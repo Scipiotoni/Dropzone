@@ -52,6 +52,26 @@ export class Net {
     let n = null; try { n = localStorage.getItem(NAME_KEY); } catch (e) { /* storage blocked */ }
     this.name = n || `${ADJ[Math.floor(Math.random() * ADJ.length)]}-${Math.floor(Math.random() * 90 + 10)}`;
     this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+    // teams: everyone owns a team code; joining a friend's code puts you in their team and their base
+    const gen = () => Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
+    let mc = null, tc = null; try { mc = localStorage.getItem('dropzone.mycode'); tc = localStorage.getItem('dropzone.team'); } catch (e) { /* storage blocked */ }
+    this.myCode = mc || gen(); this.team = tc || this.myCode; try { localStorage.setItem('dropzone.mycode', this.myCode); } catch (e) { /* storage blocked */ }
+    this.invites = {}; this.baseEdits = []; this.editSeq = 0; this.seenEdits = new Map(); this.baseKey = '';
+  }
+  // ---------------- teams
+  get isLeader() { return this.team === this.myCode; }
+  setTeam(code) { this.team = String(code || this.myCode).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || this.myCode; try { localStorage.setItem('dropzone.team', this.team); } catch (e) { /* storage blocked */ } this.baseEdits = []; this.pushLobby(); this.game.onTeamChange?.(); }
+  invite(peer) { this.invites[peer] = this.team; this.pushLobby(); }
+  teammates() { return this.lobbyPeers.filter((p) => !(p.isMe && p.sameTab) && p.kind !== 'agent' && p.presence?.t === this.team); }
+  leaderPeer() { return this.lobbyPeers.find((p) => p.presence?.mc === this.team && !(p.isMe && p.sameTab)); }
+  pendingInvites() { return this.lobbyPeers.filter((p) => p.presence?.inv && p.presence.inv[this.me] && p.presence.inv[this.me] !== this.team).map((p) => ({ from: p.presence.n, code: p.presence.inv[this.me], color: p.presence.c })); }
+  baseEdit(op, spec) { this.baseEdits.push([++this.editSeq, op, spec]); if (this.baseEdits.length > 12) this.baseEdits.shift(); this.pushLobby(); }
+  // leader: apply edits that teammates made to the shared base
+  processTeamEdits() {
+    if (!this.isLeader) return;
+    for (const p of this.teammates()) { const be = p.presence.be; if (!Array.isArray(be)) continue; const last = this.seenEdits.get(p.peer) || 0; let max = last;
+      for (const [seq, op, spec] of be) if (seq > last) { max = Math.max(max, seq); this.game.applyTeamEdit(op, spec, p.presence.n); }
+      this.seenEdits.set(p.peer, max); }
   }
   setName(n) { this.name = String(n).replace(/[^\w\- ]/g, '').slice(0, 16) || this.name; try { localStorage.setItem(NAME_KEY, this.name); } catch (e) { /* storage blocked */ } this.pushLobby(); }
   async init() {
@@ -68,12 +88,17 @@ export class Net {
     }
     if (!this.t) { this.mode = 'offline'; return; }
     this.lobby = await this.t.join('lobby');
-    this.lobby.onPeers((c) => { this.lobbyPeers = c.peers; const mine = c.peers.find((p) => p.isMe && p.sameTab); if (mine) this.me = mine.peer; });
+    this.lobby.onPeers((c) => { this.lobbyPeers = c.peers; const mine = c.peers.find((p) => p.isMe && p.sameTab); if (mine) this.me = mine.peer; this.processTeamEdits(); this.game.onLobbyChange?.(); });
     this.pushLobby();
   }
   get online() { return this.mode !== 'offline'; }
-  pushLobby() { if (!this.lobby) return; this.lobby.presence({ n: this.name, c: this.color, m: this.game.mode, r: this.raidRoom?.name || null, j: this.joinedAt }).catch(() => {}); }
-  playersOnline() { return this.lobbyPeers.filter((p) => p.kind !== 'agent' && p.presence?.n).map((p) => ({ name: p.presence.n, color: p.presence.c, mode: p.presence.m, me: p.isMe && p.sameTab })); }
+  pushLobby() {
+    if (!this.lobby) return;
+    const patch = { n: this.name, c: this.color, m: this.game.mode, r: this.raidRoom?.name || null, j: this.joinedAt, t: this.team, mc: this.myCode, inv: this.invites, be: this.isLeader ? null : this.baseEdits };
+    if (this.isLeader && this.teammates().length) patch.bs = this.game.baseSnapshot?.() || null; else patch.bs = null;
+    this.lobby.presence(patch).catch(() => { patch.bs = null; this.lobby.presence(patch).catch(() => {}); });
+  }
+  playersOnline() { return this.lobbyPeers.filter((p) => p.kind !== 'agent' && p.presence?.n).map((p) => ({ peer: p.peer, name: p.presence.n, color: p.presence.c, mode: p.presence.m, me: p.isMe && p.sameTab, team: p.presence.t === this.team, leader: p.presence.mc === this.team })); }
   dirty() { this._dirty = true; }
   event(type, data) { if (!this.raidRoom) return; this.events.push([++this.seq, type, data]); if (this.events.length > 14) this.events.shift(); }
   // ---------------- raid session
@@ -82,6 +107,8 @@ export class Net {
     // pick a raid room that is not full
     const counts = {}; for (const p of this.lobbyPeers) if (p.presence?.r && !(p.isMe && p.sameTab)) counts[p.presence.r] = (counts[p.presence.r] || 0) + 1;
     let k = 1; while ((counts['dz-raid-' + k] || 0) >= 8) k++;
+    const mate = this.teammates().find((p) => p.presence?.r?.startsWith('dz-raid-') && (counts[p.presence.r] || 0) < 8); if (mate) k = +mate.presence.r.slice(8);
+    this.leaveRaid();
     try { this.raidRoom = await this.t.join('dz-raid-' + k); } catch (e) { this.raidRoom = null; this.isHost = true; return { seed: (Math.random() * 1e9) | 0, start: Date.now() }; }
     this.raidJoinedAt = Date.now(); this.events = []; this.seen.clear();
     this.raidRoom.onPeers(() => {});
@@ -91,6 +118,11 @@ export class Net {
     this.session = host ? { seed: host.presence.sd, start: host.presence.st } : { seed: (Math.random() * 1e9) | 0, start: Date.now() };
     this.pushLobby();
     return this.session;
+  }
+  // shared base: teammates in Haven see each other (same room machinery as raids, without hostiles)
+  async joinBase() {
+    if (!this.t || !this.teammates().length) return; const name = 'dzb-' + this.team; if (this.raidRoom?.name === name) return;
+    this.leaveRaid(); try { this.raidRoom = await this.t.join(name); this.raidJoinedAt = Date.now(); this.session = { seed: 0, start: Date.now() }; this.events = []; this.seen.clear(); this.pushLobby(); } catch (e) { this.raidRoom = null; }
   }
   leaveRaid() { this.raidRoom?.leave().catch(() => {}); this.raidRoom = null; for (const r of this.remotes.values()) r.dispose(); this.remotes.clear(); this.isHost = true; this.pushLobby(); }
   electHost() {
@@ -102,7 +134,8 @@ export class Net {
   }
   // ---------------- per-frame sync
   update(dt) {
-    if (!this.raidRoom) { this.lobbyT = (this.lobbyT || 0) - dt; if (this.lobbyT <= 0) { this.lobbyT = 2; this.pushLobby(); } return; }
+    this.lobbyT = (this.lobbyT || 0) - dt; if (this.lobbyT <= 0) { this.lobbyT = 2; this.pushLobby(); }
+    if (!this.raidRoom) return;
     const G = this.game; this.electHost();
     // incoming
     for (const p of this.raidRoom.peers()) {
@@ -122,13 +155,13 @@ export class Net {
     this.sendT -= dt; if (this.sendT > 0) return; this.sendT = 1 / 15;
     const P = G.player; const w = P.weapon;
     const flags = (P.crouch ? 1 : 0) | (P.aimT > 0.4 ? 2 : 0) | (P.sprinting ? 4 : 0) | (P.dead ? 8 : 0) | (!P.onGround ? 16 : 0) | (P.vehicle ? 32 : 0) | (G.heliRide ? 64 : 0) | (P.reloadT >= 0 ? 128 : 0);
-    const patch = { n: this.name, c: this.color, j: this.raidJoinedAt, sd: this.session?.seed, st: this.session?.start,
+    const patch = { n: this.name, c: this.color, t: this.team, j: this.raidJoinedAt, sd: this.session?.seed, st: this.session?.start,
       p: [Math.round(P.pos.x * 100), Math.round(P.pos.y * 100), Math.round(P.pos.z * 100), Math.round(P.yaw * 100), Math.round(P.pitch * 100), flags, Math.round(Math.hypot(P.vel.x, P.vel.z) * 10), Math.round(P.hp), P.vehicle ? P.vehicle.id : 0, P.seat ?? -1],
       w: w ? [w.id, w.mods.optic, w.mods.muzzle, w.mods.underbarrel, w.mods.magazine, w.mods.stock, w.mods.tactical] : null,
       ev: this.events, ds: G.ai.summary(),
       h: G.heliRide ? [Math.round(G.heliRide.pos.x * 10), Math.round(G.heliRide.pos.y * 10), Math.round(G.heliRide.pos.z * 10), +G.heliRide.yaw.toFixed(2), +G.heliRide.pitch.toFixed(2), +G.heliRide.roll.toFixed(2)] : null,
       vd: P.vehicle && P.seat === 0 ? P.vehicle.netState() : null, vp: G.parkedStates(),
-      en: this.isHost ? G.enemySnapshot() : null, lz: this.isHost ? G.lootState() : null };
+      en: this.isHost && G.mode === 'raid' ? G.enemySnapshot() : null, lz: this.isHost && G.mode === 'raid' ? G.lootState() : null };
     this.raidRoom.presence(patch).catch((e) => { if (e?.code === 'invalid_argument') { this.events = this.events.slice(-4); } });
   }
 }
@@ -146,7 +179,7 @@ export class RemotePlayer {
   apply(pr) {
     const p = pr.p; this.netPos.set(p[0] / 100, p[1] / 100, p[2] / 100); this.netYaw = p[3] / 100; this.pitch = p[4] / 100; this.flags = p[5]; this.speed = p[6] / 10; this.hp = p[7]; this.vid = p[8]; this.seatIdx = p[9];
     this.crouch = !!(this.flags & 1); this.dead = !!(this.flags & 8); this.alive = !this.dead; this.hidden = !!(this.flags & 64); this.inVehicle = !!(this.flags & 32); this.reloadT = this.flags & 128 ? 0.5 : -1;
-    if (pr.n && pr.n !== this.name) { this.name = pr.n; drawTag(this.tag, pr.n, pr.c); }
+    const mate = pr.t && pr.t === this.game.net.team; if ((pr.n && pr.n !== this.name) || mate !== this.mate) { this.name = pr.n || this.name; this.mate = mate; drawTag(this.tag, (mate ? '◆ ' : '') + this.name, mate ? '#6fdf5a' : pr.c); }
     const wk = JSON.stringify(pr.w); if (wk !== this.wkey) { this.wkey = wk; if (this.gun) this.op.attachGun(null); this.gun = null; if (pr.w && WEAPONS[pr.w[0]]) { const [id, optic, muzzle, underbarrel, magazine, stock, tactical] = pr.w; this.gun = buildGun(id, { optic, muzzle, underbarrel, magazine, stock, tactical }); this.op.attachGun(this.gun); this.ws = WEAPONS[id]; } }
     if (pr.h) { if (!this.heli) { this.heli = makeHeli(); this.game.scene.add(this.heli); } const h = pr.h; this.heli.position.set(h[0] / 10, h[1] / 10, h[2] / 10); this.heli.rotation.set(0, h[3], 0, 'YXZ'); this.heli.userData.body.rotation.set(h[4], 0, h[5]); }
     else if (this.heli) { this.game.scene.remove(this.heli); this.heli = null; }
@@ -159,10 +192,10 @@ export class RemotePlayer {
     this.op.root.visible = !this.hidden || this.heli; this.op.root.position.copy(this.pos); this.op.root.rotation.y = this.yaw;
     if (this.reloadT >= 0 && !this.anim.busy && this.ws) this.anim.play(this.ws.anim === 'bolt' ? 'boltLoad' : this.ws.anim === 'pump' ? 'pumpShell' : this.ws.anim, this.ws.reload);
     const pose = this.anim.update(dt); if (this.gun) this.anim.apply(this.gun);
-    this.op.update(dt, { speed: this.inVehicle || this.hidden ? 0 : this.speed, crouch: this.crouch, aim: !!(this.flags & 2), sprint: !!(this.flags & 4), air: !!(this.flags & 16), pitch: this.pitch, dead: this.dead, seated: this.inVehicle || this.hidden,
+    this.op.update(dt, { speed: this.inVehicle || this.hidden ? 0 : this.speed, vx: this.vel.x, vz: this.vel.z, side: THREE.MathUtils.clamp((this.vel.x * Math.cos(this.yaw) - this.vel.z * Math.sin(this.yaw)) / 3, -1, 1), ground: this.groundFn || (this.groundFn = (x, z) => this.game.world.col.groundAt(x, z, this.pos.y + 0.6).y), crouch: this.crouch, aim: !!(this.flags & 2), sprint: !!(this.flags & 4), air: !!(this.flags & 16), pitch: this.pitch, dead: this.dead, seated: this.inVehicle || this.hidden,
       gunPose: pose.gun, lh: this.gun ? this.anim.handTarget(this.gun, pose.lh, 'l', _lh) : null, rh: this.gun && pose.rh ? this.anim.handTarget(this.gun, pose.rh, 'r', _rh) : null, flinch: this.flinch });
     this.flinch = false;
-    this.tag.visible = !this.dead && this.pos.distanceTo(this.game.engine.camera.position) < 120;
+    this.tag.visible = !this.dead && (this.mate || this.pos.distanceTo(this.game.engine.camera.position) < 120);
   }
   hitTest(o, d, maxT) {
     if (this.dead || this.hidden) return null; let best = null;

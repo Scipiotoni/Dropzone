@@ -222,7 +222,7 @@ export class Player {
     const gm = w?.model;
     if (gm) this.anim.apply(gm);
     this.op.update(dt, { speed: moved / Math.max(dt, 1e-4), fwd: vrel.z <= 0.3 ? 1 : -1, side: THREE.MathUtils.clamp(vrel.x / 4, -1, 1), crouch: this.crouch, air: !this.onGround, sprint: this.sprinting, aim: this.aimT > 0.3 || this.fireCD > -0.4, pitch: this.pitch, dead: this.dead,
-      land: landed, flinch: this.flinch, gunPose: pose.gun, lh: gm ? this.anim.handTarget(gm, pose.lh, 'l', _lh) : null, rh: gm && pose.rh ? this.anim.handTarget(gm, pose.rh, 'r', _rh) : null, lowReady: this.healT >= 0 });
+      land: landed, flinch: this.flinch, vx: this.vel.x, vz: this.vel.z, ground: this.groundFn || (this.groundFn = (x, z) => this.game.world.col.groundAt(x, z, this.pos.y + 0.6).y), gunPose: pose.gun, lh: gm ? this.anim.handTarget(gm, pose.lh, 'l', _lh) : null, rh: gm && pose.rh ? this.anim.handTarget(gm, pose.rh, 'r', _rh) : null, lowReady: this.healT >= 0 });
     this.flinch = false;
     this.updateCamera(dt, cam, landed);
     this.updateViewmodel(dt, cam, moved / Math.max(dt, 1e-4), pose);

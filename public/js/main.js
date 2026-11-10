@@ -6,7 +6,7 @@ import { Input, Player } from './player.js';
 import { UI } from './ui.js';
 import { Effects } from './effects.js';
 import { audio } from './audio.js';
-import { buildHotzone, DROP_ZONES, MAP_SIZE } from './hotzone.js';
+import { buildHotzone, DROP_ZONES, MAP_SIZE, PLAY } from './hotzone.js';
 import { buildBase, PLOT } from './base.js';
 import { Director } from './ai.js';
 import { Net } from './net.js';
@@ -52,7 +52,7 @@ class Game {
     this.settings = { sens: 1, vol: 0.7, quality: 'high', fov: 72, view: 'third', ...(store.get(SET_KEY) || {}) };
     this.engine.baseFov = this.settings.fov; audio.setVolume(this.settings.vol); if (this.settings.quality !== 'high') this.engine.setQuality(this.settings.quality);
     this.mode = 'menu'; this.time = 0; this.enemies = []; this.rockets = []; this.raidLoot = []; this.shakeAmt = 0; this.vehicles = []; this.containers = []; this.myParked = new Set();
-    this.ai = new Director(this); this.net = new Net(this); this.audio = audio; this.ballistics = new Ballistics(this);
+    this.ai = new Director(this); this.net = new Net(this); this.audio = audio; this.ballistics = new Ballistics(this); this.THREE = THREE;
     this.scene.add(this.engine.camera);
     this.engine.renderer.domElement.addEventListener('click', () => { if (!this.ui.isOpen() && this.mode !== 'menu') { audio.init(); this.input.lock(); } });
   }
@@ -89,7 +89,7 @@ class Game {
   showMenu() { this.mode = 'menu'; this.ui.show(false); this.ui.close(); this.input.unlock(); this.setWorld(this.base, 'menu'); this.ui.menu(!!store.get(SAVE_KEY)); }
   newGame() { this.profile = newProfile(); this.save(); this.toBase(); }
   continueGame() { this.profile = store.get(SAVE_KEY) || newProfile(); this.toBase(); }
-  save() { if (this.profile && this.mode !== 'raid') { this.profile.base = this.base.build.serialize(); store.set(SAVE_KEY, this.profile); } }
+  save() { if (this.profile && this.mode !== 'raid') { if (!this.sharedBase) this.profile.base = this.base.build.serialize(); store.set(SAVE_KEY, this.profile); } }
   saveSettings() { store.set(SET_KEY, this.settings); }
   nextUid() { return ++this.profile.uid; }
   stashCount(id) { return this.profile.stash.items[id] || 0; }
@@ -156,11 +156,28 @@ class Game {
   }
   toBase() {
     this.cleanupRaid(); this.mode = 'base'; this.setWorld(this.base, 'base'); this.ui.hideMenu(); this.ui.show(true);
-    this.base.build.load(this.profile.base); this.syncPlayerFromProfile();
+    this.loadBaseForTeam(true); this.syncPlayerFromProfile();
     const P = this.player; P.hp = P.maxHp; P.spawn(this.base.spawn, this.base.spawnYaw); P.fp = this.settings.view === 'first'; P.op.root.visible = true; P.reattach(this.scene); P.vehicle = null; P.seat = null; P.hidden = false;
     this.build = { active: false, sel: 0, rot: 0 }; document.getElementById('hud').classList.remove('building'); this.ui.buildBar(null); this.base.build.showGhost(null); this.ui.setRaidInfo('Haven', null, '');
     this.ui.setHint('<b>HAVEN</b> · Your house is right in front of you: walk in, go upstairs, check the armory wall. The Humvee in the carport drives (E).<br>Tab: loadout & stash · B: build · V: first/third person · E: interact. Use the <b>Flight Ops Console</b> in the hangar to fly into the hotzone. Check the <b>Threat Intel</b> terminal to see what the enemy has learned about you.');
-    this.setupHome(); this.save(); this.net.pushLobby();
+    this.setupHome(); this.save(); this.net.pushLobby(); this.net.joinBase();
+  }
+  baseSnapOne(p) { return [PIECE_ORDER.indexOf(p.type), p.cx, p.cz, p.level, p.edge, p.rot]; }
+  // ---------------- teams & the shared base
+  baseSnapshot() { return (this.profile?.base || []).slice(0, 160).map((p) => [PIECE_ORDER.indexOf(p.type), p.cx, p.cz, p.level, p.edge, p.rot]); }
+  decodePieces(list) { return (list || []).filter((a) => PIECE_ORDER[a[0]]).map((a) => ({ type: PIECE_ORDER[a[0]], cx: a[1], cz: a[2], level: a[3], edge: a[4], rot: a[5] })); }
+  loadBaseForTeam(force) {
+    const L = this.net.isLeader ? null : this.net.leaderPeer();
+    if (L && Array.isArray(L.presence.bs)) { const key = JSON.stringify(L.presence.bs); if (force || key !== this.baseKey || !this.sharedBase) { this.baseKey = key; this.sharedBase = true; this.base.build.load(this.decodePieces(L.presence.bs)); this.ui.feed?.(`Haven of ${L.presence.n} (your team)`); } }
+    else if (force || this.sharedBase) { this.sharedBase = false; this.baseKey = ''; this.base.build.load(this.profile.base); }
+  }
+  onLobbyChange() { if (this.mode === 'base') { this.loadBaseForTeam(false); if (this.net.teammates().length && !this.net.raidRoom) this.net.joinBase(); } const inv = this.net.pendingInvites(); if (inv.length && !this.invShown) { this.invShown = true; this.ui.toast(`${inv[0].from} invited you to their team — press T`); } }
+  onTeamChange() { this.invShown = false; if (this.mode === 'base') { this.net.leaveRaid(); this.loadBaseForTeam(true); this.net.joinBase(); } }
+  applyTeamEdit(op, a, who) {
+    const spec = this.decodePieces([a])[0]; if (!spec) return; const same = (p) => p.type === spec.type && p.cx === spec.cx && p.cz === spec.cz && p.level === spec.level && p.edge === spec.edge;
+    if (this.mode === 'base' && !this.sharedBase) { const BS = this.base.build; if (op === 'add') { if (!BS.pieces.some(same)) BS.place(spec); } else { const q = BS.pieces.find(same); if (q) BS.remove(q); } this.profile.base = BS.serialize(); }
+    else { if (op === 'add') { if (!this.profile.base.some(same)) this.profile.base.push(spec); } else this.profile.base = this.profile.base.filter((p) => !same(p)); }
+    store.set(SAVE_KEY, this.profile); this.net.pushLobby(); if (who) this.ui.feed(`${who} ${op === 'add' ? 'built' : 'removed'} ${PIECES[spec.type].name}`);
   }
   // your home: a drivable Humvee in the carport, your stash weapons on the armory wall, the hotzone map on the board
   setupHome() {
@@ -171,7 +188,7 @@ class Game {
     if (this.mapImage) { const t = new THREE.CanvasTexture(this.mapImage); t.colorSpace = THREE.SRGBColorSpace; const m = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), new THREE.MeshStandardMaterial({ map: t, roughness: 0.8 })); m.position.copy(H.mapBoard.pos); m.rotation.y = H.mapBoard.yaw; g.add(m); }
   }
   makeMapImage(W) {
-    const N = 640, C = document.createElement('canvas'); C.width = C.height = N; const x = C.getContext('2d'); const img = x.createImageData(N, N); const T = W.terrain;
+    const N = 800, C = document.createElement('canvas'); C.width = C.height = N; const x = C.getContext('2d'); const img = x.createImageData(N, N); const T = W.terrain;
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
       const wx = (i + 0.5) / N * MAP_SIZE - MAP_SIZE / 2, wz = (j + 0.5) / N * MAP_SIZE - MAP_SIZE / 2;
       const h = T.height(wx, wz), s = T.splatAt(wx, wz); const nx = T.height(wx - 1, wz) - T.height(wx + 1, wz), nz = T.height(wx, wz - 1) - T.height(wx, wz + 1);
@@ -181,7 +198,7 @@ class Game {
       img.data[k] = r * shade * cont; img.data[k + 1] = g * shade * cont; img.data[k + 2] = b * shade * cont; img.data[k + 3] = 255;
     }
     x.putImageData(img, 0, 0); x.fillStyle = 'rgba(30,30,30,0.85)';
-    for (const c of W.col.all) { if (c.noRay || c.hw > 40 || c.y1 - c.y0 < 1.5) continue; x.save(); x.translate((c.x + 320) / 640 * N, (c.z + 320) / 640 * N); x.rotate(-c.yaw); x.fillRect(-c.hw / 640 * N, -c.hd / 640 * N, c.hw * 2 / 640 * N, c.hd * 2 / 640 * N); x.restore(); }
+    for (const c of W.col.all) { if (c.noRay || c.hw > 40 || c.y1 - c.y0 < 1.5) continue; x.save(); x.translate((c.x + MAP_SIZE / 2) / MAP_SIZE * N, (c.z + MAP_SIZE / 2) / MAP_SIZE * N); x.rotate(-c.yaw); x.fillRect(-c.hw / MAP_SIZE * N, -c.hd / MAP_SIZE * N, Math.max(1, c.hw * 2 / MAP_SIZE * N), Math.max(1, c.hd * 2 / MAP_SIZE * N)); x.restore(); }
     x.strokeStyle = 'rgba(255,255,255,0.06)'; for (let i = 0; i <= 8; i++) { x.beginPath(); x.moveTo(i * N / 8, 0); x.lineTo(i * N / 8, N); x.moveTo(0, i * N / 8); x.lineTo(N, i * N / 8); x.stroke(); }
     return C;
   }
@@ -199,7 +216,7 @@ class Game {
     const target = this.findLandingSpot(new THREE.Vector3(z.pos[0], 0, z.pos[1]));
     this.spawnRaidContent(session.seed, target);
     // insertion: fly in from the map edge, flare into a hover, fast-rope down
-    const a = Math.atan2(target.x, target.z) + (Math.random() - 0.5) * 0.6; const start = new THREE.Vector3(THREE.MathUtils.clamp(target.x + Math.sin(a) * 340, -315, 315), 140, THREE.MathUtils.clamp(target.z + Math.cos(a) * 340, -315, 315));
+    const a = Math.atan2(target.x, target.z) + (Math.random() - 0.5) * 0.6; const start = new THREE.Vector3(THREE.MathUtils.clamp(target.x + Math.sin(a) * 380, -PLAY - 20, PLAY + 20), 150, THREE.MathUtils.clamp(target.z + Math.cos(a) * 380, -PLAY - 20, PLAY + 20));
     const H = this.heliModel; H.visible = true;
     const flight = new HeliFlight(H, start, Math.atan2(target.x - start.x, target.z - start.z));
     const hoverY = target.y + 6;
@@ -240,7 +257,9 @@ class Game {
   }
   spawnVehicles(r) {
     for (const v of this.vehicles) v.remove(); this.vehicles = []; this.myParked.clear();
-    const spots = [[-48, 60, 0, 'ltv'], [70, 30, 1.57, 'ltv'], [-60, 130, 0.2, 'utv'], [160, -110, 0.6, 'm35'], [-150, -150, 1.2, 'mrap'], [-165, 165, 2.4, 'utv'], [150, 60, 1.0, 'ltv'], [20, -40, 1.57, 'mrap'], [-40, -100, 0.1, 'm35'], [210, 40, 2.0, 'utv']];
+    const spots = [[-48, 60, 0, 'ltv'], [70, 30, 1.57, 'technical'], [-60, 130, 0.2, 'utv'], [160, -110, 0.6, 'm35'], [-150, -150, 1.2, 'mrap'], [-165, 165, 2.4, 'quad'], [150, 60, 1.0, 'suv'], [20, -40, 1.57, 'mrap'], [-40, -100, 0.1, 'm35'], [210, 40, 2.0, 'utv'],
+      [-80, 90, 0.4, 'suv'], [120, 15, 1.6, 'suv'], [340, -300, 0.9, 'ltv'], [365, -350, 0.9, 'technical'], [300, -330, 0, 'quad'], [-340, -320, 0, 'stryker'], [-360, -360, 1.6, 'mrap'], [-320, -340, 0.5, 'ltv'],
+      [-360, 300, 0.2, 'm35'], [-380, 360, 2.2, 'quad'], [360, 300, 1.2, 'technical'], [400, 330, 0.6, 'm35'], [0, 380, 1.57, 'suv'], [40, 400, 0.2, 'technical'], [-20, 420, 1.3, 'suv'], [420, 0, 2.5, 'm35'], [-450, 30, 1.57, 'ltv'], [450, 100, 2.4, 'stryker'], [-120, 440, 0.6, 'quad'], [-10, -420, 0.2, 'utv']];
     spots.forEach(([x, z, yaw, type], i) => { const p = new THREE.Vector3(x + (r() - 0.5) * 4, 0, z + (r() - 0.5) * 4); this.vehicles.push(new Vehicle(this, i + 1, type, p, yaw + (r() - 0.5) * 0.3, i)); });
   }
   cleanupRaid() {
@@ -287,8 +306,8 @@ class Game {
   shake(a) { this.player.shakeT = Math.min(1.5, this.player.shakeT + a); }
   compassMarks() {
     const out = [];
-    if (this.mode === 'raid') { for (const e of this.hot.extracts) if (e.active) out.push({ x: e.pos[0], z: e.pos[1], icon: '◆', color: '#4ad6f0' }); for (const R of this.net.remotes.values()) if (!R.dead) out.push({ x: R.pos.x, z: R.pos.z, icon: '●', color: '#e8e2d2' }); }
-    if (this.mode === 'base') { const c = this.base.interact[0]; out.push({ x: c.pos.x, z: c.pos.z, icon: '▼', color: '#e8a832' }); }
+    if (this.mode === 'raid') { for (const e of this.hot.extracts) if (e.active) out.push({ x: e.pos[0], z: e.pos[1], icon: '◆', color: '#4ad6f0' }); for (const R of this.net.remotes.values()) if (!R.dead) out.push({ x: R.pos.x, z: R.pos.z, icon: R.mate ? '◆' : '●', color: R.mate ? '#6fdf5a' : '#e8e2d2' }); }
+    if (this.mode === 'base') { const c = this.base.interact[0]; out.push({ x: c.pos.x, z: c.pos.z, icon: '▼', color: '#e8a832' }); for (const R of this.net.remotes.values()) out.push({ x: R.pos.x, z: R.pos.z, icon: '◆', color: '#6fdf5a' }); }
     return out;
   }
   onPlayerDeath(by) {
@@ -357,7 +376,7 @@ class Game {
     else if (type === 'gren') { this.ai.throwGrenade(V3(d[1], d[2], d[3]), V3(d[1] + d[4], d[2] + d[5], d[3] + d[6]), d[0] ? 'smoke' : 'frag', 'net'); const g = this.ai.grenades[this.ai.grenades.length - 1]; if (g) g.v.set(d[4], d[5], d[6]); }
     else if (type === 'rk' && !this.net.isHost) { const M = worldMats(); const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.8, 8).rotateX(Math.PI / 2), M.steel); mesh.position.set(d[0], d[1], d[2]); this.scene.add(mesh); this.rockets.push({ mesh, v: V3(d[3], d[4], d[5]), t: 0, visual: true }); }
     else if (type === 'vh') { const v = this.vehicles.find((x) => x.id === d[0]); if (v && v.driverIsMe()) v.damage(d[1]); }
-    else if (type === 'die') { this.ui.feed(`${R?.name || 'An operator'} was killed${d[1] === this.net.me ? ' by you' : ''}`); if (d[1] === this.net.me && this.raid) { this.raid.kills++; this.ai.onKill({ type: 'player' }); } }
+    else if (type === 'die') { this.ui.feed(`${R?.mate ? 'Teammate ' : ''}${R?.name || 'An operator'} was killed${d[1] === this.net.me ? (R?.mate ? ' by you (friendly fire!)' : ' by you') : ''}`); if (d[1] === this.net.me && this.raid) { this.raid.kills++; this.ai.onKill({ type: 'player' }); } }
   }
   // ------------------------------------------------------------------ interaction
   findInteract() {
@@ -402,7 +421,7 @@ class Game {
   // ------------------------------------------------------------------ vehicles
   enterVehicle(v, seat) {
     const P = this.player; P.vehicle = v; P.seat = seat; P.inVehicle = true; v.seats[seat] = 'me'; if (seat === 0) { v.settleT = 0; this.myParked.add(v.id); }
-    P.vcam = { yaw: 0, pitch: 0.15, mode: 'third' }; this.engineLoop = audio.loop('engine'); this.ui.toast(`${seat === 0 ? 'Driving' : 'Riding in'} ${v.def.name} · E exit · V camera${seat === 0 ? ' · Space handbrake · R flip' : ' · you can shoot'}`);
+    P.vcam = { yaw: 0, pitch: 0.15, mode: 'third' }; this.engineLoop = audio.loop('engine'); this.ui.toast(`${seat === 0 ? 'Driving' : seat === v.def.gunSeat ? 'On the .50 cal in' : 'Riding in'} ${v.def.name} · E exit · V camera${seat === 0 ? ' · Space handbrake · R flip' : seat === v.def.gunSeat ? ' · LMB fire (watch the heat)' : ' · you can shoot'}`);
   }
   exitVehicle(force) {
     const P = this.player, v = P.vehicle; if (!v) return;
@@ -416,6 +435,7 @@ class Game {
     if (I.hit('KeyV')) P.vcam.mode = P.vcam.mode === 'third' ? 'first' : 'third';
     if (I.hit('KeyE')) { this.exitVehicle(); return; }
     if (P.seat === 0 && I.hit('KeyR') && Math.abs(v.sim.speed) < 3) v.sim.flip();
+    for (let i = 0; i < Math.min(6, v.seats.length); i++) if (I.hit('Digit' + (i + 1)) && i !== P.seat && !v.seats[i] && !(i === 0 && v.driverRemote)) { v.seats[P.seat] = null; v.seats[i] = 'me'; if (i === 0) { v.settleT = 0; this.myParked.add(v.id); } P.seat = i; this.ui.toast(i === 0 ? 'Driver seat' : i === v.def.gunSeat ? 'Gunner (.50 cal)' : `Passenger seat ${i + 1}`); }
     const seatW = v.seatWorld(P.seat); P.pos.copy(seatW).setY(seatW.y - 0.5);
     P.op.root.position.copy(seatW).add(new THREE.Vector3(0, -0.9, 0)); P.op.root.quaternion.copy(v.q); P.op.root.rotateY(Math.PI);
     const heading = v.yaw;
@@ -424,9 +444,24 @@ class Game {
     cam.fov += (this.engine.baseFov + Math.min(10, Math.abs(v.sim.speed) * 0.3) - cam.fov) * Math.min(1, dt * 4); cam.updateProjectionMatrix(); cam.updateMatrixWorld();
     // passengers can shoot: aim follows the camera
     if (P.seat > 0) { const e = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ'); P.yaw = e.y; P.pitch = e.x; }
+    // mounted heavy machine gun (Humvee turret, technical bed, Stryker remote weapon station)
+    v.heat = Math.max(0, (v.heat || 0) - dt * 0.22); v.gunCD = (v.gunCD || 0) - dt;
+    if (P.seat === def.gunSeat) {
+      const tur = v.model.userData.turret; if (tur) { const e = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ'); tur.rotation.y = e.y - v.yaw; }
+      if (v.heat > 0.98) v.overheat = true; if (v.overheat && v.heat < 0.35) v.overheat = false;
+      if ((I.buttons & 1) && v.gunCD <= 0 && !v.overheat && !this.ui.isOpen()) {
+        v.gunCD = 60 / 550; v.heat += 0.035;
+        const mz = v.model.userData.gunMuzzle.getWorldPosition(new THREE.Vector3()); const d = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+        const h = this.world.col.ray(cam.position, d, 900); const aim = cam.position.clone().addScaledVector(d, h ? h.t : 900);
+        const dir = aim.sub(mz).normalize(); dir.x += (Math.random() - 0.5) * 0.012; dir.y += (Math.random() - 0.5) * 0.012; dir.normalize();
+        this.ballistics.fire(mz, dir, { ammo: 'a50bmg', damage: 95, muzzle: mz, color: 0xffb060, onHit: (eh, end, dmg) => { eh.point = end; eh.enemy.damage(dmg * eh.mult, eh, P.pos, true); this.ui.hitmarker(eh.mult > 1.4, !eh.enemy.alive); audio.hitmarker(); } });
+        this.fx.muzzle(v.model.userData.gunMuzzle, dir, 1.8, 1); audio.gunshot('heavy', null, 1.3); this.noise(mz, 200, null); this.shake(0.12);
+        this.net.event('shot', [+mz.x.toFixed(2), +mz.y.toFixed(2), +mz.z.toFixed(2), +dir.x.toFixed(4), +dir.y.toFixed(4), +dir.z.toFixed(4), 0, 'a50bmg']);
+      }
+    }
     P.op.update(dt, { speed: 0, seated: true, wheel: P.seat === 0 ? { turn: v.sim.steer * 2 } : null, noGun: P.seat === 0, pitch: P.seat > 0 ? P.pitch : 0, aim: P.seat > 0 });
     P.vm.visible = false;
-    this.ui.vehicleHud({ name: def.name, speed: Math.abs(v.sim.speed || v.netSpeed || 0), hp: v.hp, maxHp: def.hp, fuel: v.sim.fuel, seat: P.seat });
+    this.ui.vehicleHud({ name: def.name, speed: Math.abs(v.sim.speed || v.netSpeed || 0), hp: v.hp, maxHp: def.hp, fuel: v.sim.fuel, seat: P.seat, gun: P.seat === def.gunSeat ? { heat: v.heat || 0, over: v.overheat } : null });
     this.engineLoop?.set(null, 0.15 + Math.min(0.5, v.sim.rpm * 0.35));
     if (this.player.stats) this.player.stats.vehicleT = (this.player.stats.vehicleT || 0) + dt;
   }
@@ -440,12 +475,13 @@ class Game {
     if (!ui.isOpen()) {
       if (I.hit('Tab') && (this.mode === 'base' || this.mode === 'raid')) ui.inventory();
       else if (I.hit('KeyM') && this.mode === 'raid') ui.raidMap();
-    } else if (I.hit('Tab') || I.hit('KeyM')) ui.close();
+      else if (I.hit('KeyT') && (this.mode === 'base' || this.mode === 'raid')) ui.team();
+    } else if (I.hit('Tab') || I.hit('KeyM') || (I.hit('KeyT') && ui.open === 'team')) ui.close();
     if (!I.locked && !ui.isOpen() && (this.mode === 'base' || this.mode === 'raid') && this.wasLocked) ui.pause();
     this.wasLocked = I.locked;
     const frozen = ui.isOpen() || this.mode === 'extracted';
     if (this.mode === 'heli') this.updateHeliRide(dt);
-    else if (P.vehicle && (this.mode === 'raid' || this.mode === 'base')) { if (!frozen) this.updateInVehicle(dt); if (P.seat > 0 && !frozen) P.update(dt, I, { frozen: false, seated: true }); }
+    else if (P.vehicle && (this.mode === 'raid' || this.mode === 'base')) { if (!frozen) this.updateInVehicle(dt); if (P.vehicle && P.seat > 0 && P.seat !== P.vehicle.def.gunSeat && !frozen) P.update(dt, I, { frozen: false, seated: true }); }
     else if (this.mode === 'base' || this.mode === 'raid' || this.mode === 'dead') {
       if (this.mode === 'base' && !frozen) this.updateBuild(dt);
       P.update(dt, I, { frozen, build: this.build?.active });
@@ -536,7 +572,7 @@ class Game {
   spawnWave() {
     const players = [this.player, ...this.net.remotes.values()].filter((p) => !p.dead && !p.hidden); if (!players.length) return;
     const tgt = players[Math.floor(Math.random() * players.length)]; const a = Math.random() * 6.28, d = 110 + Math.random() * 60;
-    const c = new THREE.Vector3(THREE.MathUtils.clamp(tgt.pos.x + Math.cos(a) * d, -280, 280), 0, THREE.MathUtils.clamp(tgt.pos.z + Math.sin(a) * d, -280, 280));
+    const c = new THREE.Vector3(THREE.MathUtils.clamp(tgt.pos.x + Math.cos(a) * d, -PLAY + 15, PLAY - 15), 0, THREE.MathUtils.clamp(tgt.pos.z + Math.sin(a) * d, -PLAY + 15, PLAY - 15));
     const list = []; const n = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) { const p = c.clone().add(new THREE.Vector3((Math.random() - 0.5) * 16, 0, (Math.random() - 0.5) * 16)); p.y = this.hot.col.groundAt(p.x, p.z, 999).y; const E = Math.random() < 0.6 ? Raider : Math.random() < 0.5 ? Drone : Crawler; const e = new E(this, p, 1); e.state = 'search'; e.lastSeen = tgt.pos.clone(); this.enemies.push(e); list.push(e); }
     this.ai.formSquads(list); this.ui.feed('Hostile reinforcements spotted');
@@ -557,12 +593,12 @@ class Game {
     if (hit) { spec = BS.specFromHit(type, hit, B.rot); ok = BS.supported(spec) && afford; }
     BS.showGhost(spec, ok); this.ui.buildBar(B.sel, spec, ok, afford);
     if (I.clicked & 1) {
-      if (spec && ok) { for (const [k, n] of Object.entries(PIECES[type].cost)) this.stashAddItem(k, -n); BS.place(spec); audio.mech(this.player.pos, 'pump'); this.fx.dust(BS.ghost.position.clone(), 6, 0.3); this.save(); }
+      if (spec && ok) { for (const [k, n] of Object.entries(PIECES[type].cost)) this.stashAddItem(k, -n); BS.place(spec); audio.mech(this.player.pos, 'pump'); this.fx.dust(BS.ghost.position.clone(), 6, 0.3); if (this.sharedBase) this.net.baseEdit('add', this.baseSnapOne(spec)); else this.net.pushLobby(); this.save(); }
       else { audio.click(200, 0.1, 0.1, 'sawtooth'); this.ui.toast(!afford ? 'Not enough resources in stash' : 'Needs support (foundation / floor / wall below)'); }
     }
     if (I.hit('KeyF') && hit?.c?.build) {
       const p = hit.c.build; const deps = BS.dependents(p);
-      for (const q of [p, ...deps]) { for (const [k, n] of Object.entries(PIECES[q.type].cost)) this.stashAddItem(k, Math.floor(n / 2)); BS.remove(q); }
+      for (const q of [p, ...deps]) { for (const [k, n] of Object.entries(PIECES[q.type].cost)) this.stashAddItem(k, Math.floor(n / 2)); BS.remove(q); if (this.sharedBase) this.net.baseEdit('del', this.baseSnapOne(q)); }
       audio.explosion(this.player.pos, 0.1); this.ui.toast(`Demolished ${PIECES[p.type].name}`); this.save();
     }
   }
