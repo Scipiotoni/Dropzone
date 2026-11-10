@@ -243,16 +243,16 @@ export function makeVehicleModel(type, variant = 0) {
 // one live vehicle in the world (sim when driven locally, interpolated view otherwise)
 export class Vehicle {
   constructor(game, id, type, pos, yaw, variant = 0) {
-    this.game = game; this.id = id; this.type = type; this.def = VEHICLES[type]; this.hp = this.def.hp; this.alive = true;
-    this.model = makeVehicleModel(type, variant); game.world.root.add(this.model);
-    this.sim = new VehicleSim(type, game.world);
+    this.game = game; this.W = game.world; this.id = id; this.type = type; this.def = VEHICLES[type]; this.hp = this.def.hp; this.alive = true;
+    this.model = makeVehicleModel(type, variant); this.W.root.add(this.model);
+    this.sim = new VehicleSim(type, this.W);
     const q = new THREE.Quaternion().setFromAxisAngle(n3(0, 1, 0), yaw);
-    const y = game.world.terrain.height(pos.x, pos.z) + this.def.half[1] + this.def.wheelR + 0.4;
+    const y = this.W.terrain.height(pos.x, pos.z) + this.def.half[1] + this.def.wheelR + 0.4;
     this.sim.setState(n3(pos.x, y, pos.z), q, n3(0, 0, 0));
     this.pos = this.sim.pos; this.q = this.sim.q; this.netPos = this.pos.clone(); this.netQ = this.q.clone();
     this.seats = new Array(this.def.seats.length).fill(null); // 'me' | peer id
     this.driverRemote = null; this.settleT = 2; this.smokeT = 0;
-    this.col = game.world.col.box(pos.x, pos.z, this.def.half[0] * 2, this.def.half[2] * 2, y - this.def.half[1], y + this.def.half[1], yaw, 'metal', { vehicle: this.sim, walk: true });
+    this.col = this.W.col.box(pos.x, pos.z, this.def.half[0] * 2, this.def.half[2] * 2, y - this.def.half[1], y + this.def.half[1], yaw, 'metal', { vehicle: this.sim, walk: true });
   }
   get yaw() { const f = n3(0, 0, 1).applyQuaternion(this.q); return Math.atan2(f.x, f.z); }
   driverIsMe() { return this.seats[0] === 'me'; }
@@ -261,9 +261,9 @@ export class Vehicle {
     const local = this.driverIsMe() || (!this.seats[0] && !this.driverRemote && this.settleT > 0);
     if (local) {
       const inp = this.driverIsMe() && input ? { throttle: (input.down('KeyW') ? 1 : 0) - (input.down('KeyS') ? 1 : 0), steer: (input.down('KeyA') ? 1 : 0) - (input.down('KeyD') ? 1 : 0), handbrake: input.down('Space') } : { throttle: 0, steer: 0, handbrake: true };
-      this.game.world.col.remove(this.col);
+      this.W.col.remove(this.col);
       this.sim.step(dt, inp);
-      this.game.world.col.add(this.col);
+      this.W.col.add(this.col);
       if (!this.driverIsMe()) this.settleT -= dt;
       // crash damage
       if (this.sim.maxImpact > 10 && this.driverIsMe()) { const dmg = (this.sim.maxImpact - 10) ** 2 * this.def.mass / 600; this.damage(dmg); this.game.shake(Math.min(1.2, dmg / 120)); audio.explosion(this.pos, 0.12); }
@@ -273,12 +273,12 @@ export class Vehicle {
     }
     // collider + model
     const yaw = this.yaw; Object.assign(this.col, { x: this.pos.x, z: this.pos.z, y0: this.pos.y - this.def.half[1], y1: this.pos.y + this.def.half[1], yaw, cos: Math.cos(yaw), sin: Math.sin(yaw) });
-    this.game.world.col.remove(this.col); this.game.world.col.add(this.col);
+    this.W.col.remove(this.col); this.W.col.add(this.col);
     const m = this.model; m.position.copy(this.pos); m.quaternion.copy(this.q);
     const up = n3(0, 1, 0).applyQuaternion(this.q); const L = this.def.rest + this.def.wheelR;
     m.userData.wheels.forEach((w, i) => {
       const wh = this.sim.wheels[i]; let comp;
-      if (local) comp = wh.comp; else { const mp = _a.set(w.def[0], w.def[1], w.def[2]).applyQuaternion(this.q).add(this.pos); const gy = this.game.world.terrain.height(mp.x, mp.z); comp = Math.max(0, Math.min(this.def.rest, L - (mp.y - gy) / Math.max(0.3, up.y))); wh.spin += (this.netSpeed || 0) / this.def.wheelR * dt; }
+      if (local) comp = wh.comp; else { const mp = _a.set(w.def[0], w.def[1], w.def[2]).applyQuaternion(this.q).add(this.pos); const gy = this.W.terrain.height(mp.x, mp.z); comp = Math.max(0, Math.min(this.def.rest, L - (mp.y - gy) / Math.max(0.3, up.y))); wh.spin += (this.netSpeed || 0) / this.def.wheelR * dt; }
       w.pivot.position.y = w.def[1] - this.def.rest + comp; w.pivot.rotation.y = w.def[3] ? (local ? this.sim.steer : this.netSteer || 0) : 0; w.spin.rotation.x = wh.spin;
     });
     const driven = !!(this.seats[0] || this.driverRemote);
@@ -306,5 +306,5 @@ export class Vehicle {
   applyNet(a, peer) { this.netPos.set(a[1] / 100, a[2] / 100, a[3] / 100); this.netQ.set(a[4], a[5], a[6], a[7]).normalize(); this.netSteer = a[8]; this.netSpeed = a[9]; if (a[10] < this.hp) this.hp = a[10]; if (this.hp <= 0 && this.alive) this.explode(); if (this.first !== false) { this.pos.copy(this.netPos); this.q.copy(this.netQ); this.first = false; } }
   seatWorld(i, out = new THREE.Vector3()) { const s = this.def.seats[i]; return out.set(s[0], s[1], s[2]).applyQuaternion(this.q).add(this.pos); }
   freeSeat(prefDriver = true) { for (let i = 0; i < this.seats.length; i++) if (!this.seats[i] && !(i === 0 && this.driverRemote)) return i; return -1; }
-  remove() { this.game.world.root.remove(this.model); this.game.world.col.remove(this.col); }
+  remove() { this.W.root.remove(this.model); this.W.col.remove(this.col); }
 }

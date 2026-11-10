@@ -2,7 +2,7 @@
 // and a 4m-grid construction plot with snapping foundations, walls, floors, stairs, stations and props.
 import * as THREE from 'three';
 import { makeNoise, seeded } from './noise.js';
-import { Batcher, CollisionWorld, boxGeo, cylGeo } from './geom.js';
+import { Batcher, CollisionWorld, boxGeo, cylGeo, scaleUV } from './geom.js';
 import { Terrain } from './terrain.js';
 import { smooth } from './textures.js';
 import * as P from './props.js';
@@ -21,13 +21,15 @@ export function buildBase(scene) {
     // access road heading south out of the valley
     const road = smooth(10, 4, Math.abs(x - Math.sin(z / 40) * 6)) * smooth(30, 60, z); h *= 1 - road * 0.85;
     if (x > PLOT.x0 - 6 && x < PLOT.x0 + PLOT.nx * CELL + 6 && z > PLOT.z0 - 40 && z < PLOT.z0 + PLOT.nz * CELL + 6) h = Math.min(h, 0);
+    { const m = smooth(-70, -62, x) * smooth(24, 18, z) * smooth(-30, -22, z); h = h * (1 - m) + Math.min(h, 0) * m; } // home lot
     return h + noise.fbm(x / 9, z / 9, 2) * 0.12;
   };
   const splat = (x, z, y, slope) => {
     const inPlot = x > PLOT.x0 - 2 && x < PLOT.x0 + PLOT.nx * CELL + 2 && z > PLOT.z0 - 2 && z < PLOT.z0 + PLOT.nz * CELL + 2;
-    const apron = x > -26 && x < 26 && z > -62 && z < PLOT.z0;
+    const apron = (x > -26 && x < 26 && z > -62 && z < PLOT.z0) || (x > -62 && x < -40 && z > -20 && z < -6);
+    const yard = x > -64 && x < -36 && z > -6 && z < 18;
     const rock = smooth(0.2, 0.4, slope);
-    return [Math.max(0, 1 - rock * 1.4) * (inPlot || apron ? 0 : 1), inPlot ? 1 : 0.25, rock, apron ? 2 : 0];
+    return [Math.max(0, 1 - rock * 1.4) * (inPlot || apron ? 0 : 1) * (yard ? 1.4 : 1), inPlot ? 1 : 0.25, rock, apron ? 2 : 0];
   };
   const terrain = new Terrain({ size: 320, res: 160, heightFn: height, splatFn: splat });
   root.add(terrain.mesh);
@@ -70,13 +72,14 @@ export function buildBase(scene) {
   root.add(P.makeTrees(W, ts, rand));
   const rs = []; for (let i = 0; i < 160; i++) { const x = (rand() - 0.5) * 300, z = (rand() - 0.5) * 300; const r = Math.hypot(x * 0.8, (z - 5) * 0.9); if (r < 50) continue; rs.push({ x, z, y: terrain.height(x, z), s: 1.5 + rand() * 4 }); }
   root.add(P.makeRocks(W, rs, rand));
-  root.add(terrain.grass(18000, rand, (x, z) => x > PLOT.x0 - 3 && x < PLOT.x0 + PLOT.nx * CELL + 3 && z > PLOT.z0 - 45 && z < PLOT.z0 + PLOT.nz * CELL + 3));
+  root.add(terrain.grass(18000, rand, (x, z) => (x > -59 && x < -40 && z > -19 && z < 12) || x > PLOT.x0 - 3 && x < PLOT.x0 + PLOT.nx * CELL + 3 && z > PLOT.z0 - 45 && z < PLOT.z0 + PLOT.nz * CELL + 3));
+  W.home = buildHome(W, root, rand);
   W.batch.build(root);
   // plot border markers
   const g = new THREE.Group(); root.add(g);
   for (let i = 0; i <= PLOT.nx; i++) for (const k of [0, PLOT.nz]) { const m = new THREE.Mesh(boxGeo(0.12, 0.6, 0.12), M.yellow); m.position.set(PLOT.x0 + i * CELL, 0.3, PLOT.z0 + k * CELL); g.add(m); }
   for (let j = 0; j <= PLOT.nz; j++) for (const k of [0, PLOT.nx]) { const m = new THREE.Mesh(boxGeo(0.12, 0.6, 0.12), M.yellow); m.position.set(PLOT.x0 + k * CELL, 0.3, PLOT.z0 + j * CELL); g.add(m); }
-  W.spawn = new THREE.Vector3(0, 0, -20); W.spawnYaw = Math.PI;
+  W.spawn = new THREE.Vector3(-38, 0, 4); W.spawnYaw = Math.PI / 2;
   W.build = new BuildSystem(W, root);
   return W;
 }
@@ -230,4 +233,75 @@ export class BuildSystem {
     for (const L of this.lights) L.intensity = powered ? 60 : 0;
     for (const p of this.pieces) { const u = p.obj?.userData; if (!u) continue; if (u.spin) u.spin.rotation.y = Math.sin(t * 0.4 + p.id) * 1.2; if (u.flag) u.flag.rotation.y = Math.sin(t * 2 + p.id) * 0.15; if (u.fireLight) u.fireLight.intensity = 3 + Math.sin(t * 13 + p.id) * 0.8 + Math.sin(t * 7.3) * 0.6; }
   }
+}
+
+// ----------------------------------------------------------------------------- your home: two-storey house + carport
+function buildHome(W, root, rand) {
+  const M = P.worldMats(); const hx = -50, hz = 4, yaw = -Math.PI / 2; const S = new P.Site(W, hx, 0, hz, yaw);
+  const L = 14, D = 11, FH = 3.2, T = 0.3, y0 = 0.25;
+  const fab = (c) => { const m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.95 }); return m; };
+  const couchM = fab(0x4a5a48), bedM = fab(0x6a6e5a), rugM = fab(0x7a3a2a), pillowM = fab(0xd8d2c0);
+  // foundation + floors
+  S.box(L + 0.8, 0.45, D + 0.8, M.concreteDark, 0, -0.2, 0, 0, { ts: 3 });
+  S.part(boxGeo(L - 0.6, 0.04, D - 0.6), M.wood, 0, y0 + 0.02, 0);
+  // ground floor walls: front door + windows, back windows, side windows
+  P.wallWithHoles(S, L, FH, T, M.brick, 0, y0, -D / 2, 0, [{ x0: 1.5, x1: 3.3, y0: 0.9, y1: 2.3 }, { x0: 6.3, x1: 7.7, y0: 0, y1: 2.3 }, { x0: 10.2, x1: 12.4, y0: 0.9, y1: 2.3 }]);
+  P.wallWithHoles(S, L, FH, T, M.brick, 0, y0, D / 2, Math.PI, [{ x0: 2, x1: 3.6, y0: 1.0, y1: 2.2 }, { x0: 9.6, x1: 11.2, y0: 1.0, y1: 2.2 }]);
+  for (const sx of [-1, 1]) P.wallWithHoles(S, D - T, FH, T, M.brick, sx * (L / 2 - T / 2), y0, 0, sx * Math.PI / 2, [{ x0: 4, x1: 6.4, y0: 0.9, y1: 2.3 }]);
+  // glass panes + frames
+  for (const [x0, x1, z, yb, yt] of [[1.5, 3.3, -D / 2, 0.9, 2.3], [10.2, 12.4, -D / 2, 0.9, 2.3], [2, 3.6, D / 2, 1, 2.2], [9.6, 11.2, D / 2, 1, 2.2]]) { const cx = (x0 + x1) / 2 - L / 2; S.part(boxGeo(x1 - x0, yt - yb, 0.03), M.glass, cx, y0 + (yb + yt) / 2, z); S.part(boxGeo(x1 - x0 + 0.1, 0.08, 0.34), M.wood, cx, y0 + yb - 0.04, z); S.part(boxGeo(0.06, yt - yb, 0.06), M.woodDark, cx, y0 + (yb + yt) / 2, z); }
+  // interior partition: living (x<1) | armory & kitchen (x>1)
+  P.wallWithHoles(S, D - 0.6, FH - 0.05, 0.16, M.plaster, 1.0, y0, 0, Math.PI / 2, [{ x0: 4.2, x1: 5.6, y0: 0, y1: 2.25 }]);
+  // upper floor slab with stairwell (living side, back wall)
+  const fy = y0 + FH; S.box(L - 4.4, 0.25, D, M.concrete, 2.2, fy - 0.25, 0); S.box(4.4, 0.25, D - 3.2, M.concrete, -L / 2 + 2.2, fy - 0.25, -1.6);
+  S.part(boxGeo(L - 0.6, 0.03, D - 0.6), M.wood, 0, fy + 0.015, 0);
+  // stairs (along the back wall, rising toward -z)
+  const sx0 = -L / 2 + 1.4;
+  for (let i = 0; i < 14; i++) S.part(boxGeo(1.7, 0.08, 0.24), M.wood, sx0, y0 + (i + 1) * FH / 14 - 0.04, D / 2 - 0.5 - i * 0.2);
+  S.part(boxGeo(0.06, 0.9, 3.0), M.steel, sx0 + 0.88, y0 + FH / 2 + 0.4, D / 2 - 1.9, Math.atan2(FH, 2.8));
+  S.ramp(1.7, 2.8, sx0, D / 2 - 1.9, y0 + 0.02, fy + 0.02, Math.PI);
+  // upper walls
+  P.wallWithHoles(S, L, FH, T, M.plaster, 0, fy, -D / 2, 0, [{ x0: 2, x1: 4, y0: 0.9, y1: 2.2 }, { x0: 6, x1: 8, y0: 0, y1: 2.3 }, { x0: 10, x1: 12, y0: 0.9, y1: 2.2 }]);
+  P.wallWithHoles(S, L, FH, T, M.plaster, 0, fy, D / 2, Math.PI, [{ x0: 6, x1: 8, y0: 0.9, y1: 2.2 }]);
+  for (const sx of [-1, 1]) P.wallWithHoles(S, D - T, FH, T, M.plaster, sx * (L / 2 - T / 2), fy, 0, sx * Math.PI / 2, [{ x0: 4.2, x1: 6.2, y0: 0.9, y1: 2.2 }]);
+  // balcony over the porch + railing
+  S.box(4.2, 0.2, 2.2, M.concrete, 0, fy - 0.2, -D / 2 - 1.1); S.part(boxGeo(4.2, 0.9, 0.06), M.steel, 0, fy + 0.45, -D / 2 - 2.2); for (const s2 of [-1, 1]) S.part(boxGeo(0.06, 0.9, 2.2), M.steel, s2 * 2.1, fy + 0.45, -D / 2 - 1.1);
+  for (const s2 of [-1, 1]) S.box(0.25, FH - 0.2, 0.25, M.woodDark, s2 * 2.0, y0, -D / 2 - 2.0, 0, { m: 'wood' });
+  // roof with parapet
+  S.box(L + 0.4, 0.3, D + 0.4, M.concreteDark, 0, fy + FH, 0); for (const [w, d, x, z] of [[L + 0.4, 0.2, 0, -D / 2 - 0.1], [L + 0.4, 0.2, 0, D / 2 + 0.1], [0.2, D + 0.4, -L / 2 - 0.1, 0], [0.2, D + 0.4, L / 2 + 0.1, 0]]) S.box(w, 0.6, d, M.concreteDark, x, fy + FH + 0.3, z, 0, { noCol: true });
+  S.part(cylGeo(0.5, 0.5, 1.2, 14), M.white, 4, fy + FH + 0.9, 2); S.part(boxGeo(1.2, 0.08, 0.8), M.machineDark, -3, fy + FH + 0.5, -2, -0.4); // water tank, solar panel
+  // porch steps
+  S.box(2.4, 0.15, 1.0, M.concrete, 0, 0, -D / 2 - 0.6); S.box(2.4, 0.15, 0.6, M.concrete, 0, -0.12, -D / 2 - 1.3);
+  // ---- living room furniture (x < 1)
+  const lx = -L / 2 + 3.2;
+  S.box(2.6, 0.45, 0.95, couchM, lx, y0, -1.2, 0, { m: 'wood' }); S.part(boxGeo(2.6, 0.5, 0.2), couchM, lx, y0 + 0.65, -0.8); for (const s2 of [-1, 1]) S.part(boxGeo(0.2, 0.35, 0.95), couchM, lx + s2 * 1.3, y0 + 0.62, -1.2);
+  S.box(1.2, 0.45, 0.6, M.woodDark, lx, y0, -2.6, 0, { m: 'wood' }); S.part(boxGeo(3.2, 0.01, 2.2), rugM, lx, y0 + 0.03, -2.2);
+  S.box(1.8, 0.5, 0.45, M.woodDark, lx, y0, -D / 2 + 0.45, 0, { m: 'wood' }); S.part(boxGeo(1.4, 0.8, 0.06), M.machineDark, lx, y0 + 1.1, -D / 2 + 0.4); const tv = new THREE.Mesh(boxGeo(1.3, 0.7, 0.01), new THREE.MeshBasicMaterial({ color: 0x2a5a7a, toneMapped: false })); tv.position.copy(S.world(lx, y0 + 1.1, -D / 2 + 0.44)); tv.rotation.y = yaw; root.add(tv);
+  S.part(cylGeo(0.03, 0.03, 1.5, 6), M.steel, lx + 1.8, y0 + 0.75, -0.4); S.part(cylGeo(0.12, 0.22, 0.3, 10), M.emWarm, lx + 1.8, y0 + 1.55, -0.4);
+  // ---- kitchen (x > 1, back half)
+  S.box(5.2, 0.9, 0.65, M.white, 4.2, y0, D / 2 - 0.5, 0, { m: 'metal' }); S.part(boxGeo(5.3, 0.05, 0.7), M.tile, 4.2, y0 + 0.92, D / 2 - 0.5);
+  S.box(0.8, 1.9, 0.7, M.steel, L / 2 - 0.7, y0, D / 2 - 0.5, 0, { m: 'metal' }); S.part(boxGeo(0.5, 0.06, 0.4), M.steel, 3.0, y0 + 0.95, D / 2 - 0.5);
+  S.box(1.6, 0.75, 0.9, M.woodDark, 4.4, y0, 1.6, 0, { m: 'wood' }); for (const s2 of [-1, 1]) S.part(boxGeo(0.45, 0.45, 0.45), M.wood, 4.4 + s2 * 1.0, y0 + 0.22, 1.6);
+  // ---- armory (x > 1, front half): gun wall, ammo crates, map board
+  S.part(boxGeo(4.8, 2.0, 0.05), M.woodDark, 4.0, y0 + 1.5, -D / 2 + 0.2);
+  for (let i = 0; i < 4; i++) S.box(0.9, 0.45, 0.55, M.green, 2.6 + i * 1.0, y0, -D / 2 + 1.0 + (i % 2) * 0.1, 0.05 * i, { m: 'wood' });
+  S.box(1.6, 0.9, 0.7, M.machineDark, L / 2 - 1.0, y0, -1.2, Math.PI / 2, { m: 'metal' });
+  const rackSlots = []; for (let i = 0; i < 8; i++) { const r = i % 4, c = Math.floor(i / 4); rackSlots.push({ pos: S.world(2.1 + r * 1.25, y0 + 2.15 - c * 0.85, -D / 2 + 0.3), yaw }); S.part(boxGeo(0.08, 0.05, 0.12), M.steel, 2.1 + r * 1.25 - 0.3, y0 + 2.08 - c * 0.85, -D / 2 + 0.3); S.part(boxGeo(0.08, 0.05, 0.12), M.steel, 2.1 + r * 1.25 + 0.3, y0 + 2.08 - c * 0.85, -D / 2 + 0.3); }
+  const mapBoard = { pos: S.world(L / 2 - 0.2, y0 + 1.6, -2.6), yaw: yaw - Math.PI / 2 };
+  // ---- upstairs bunk room
+  for (const bz of [-2.8, 0.8]) { S.box(2.1, 0.45, 1.0, M.steel, L / 2 - 1.5, fy, bz, 0, { m: 'metal' }); S.part(boxGeo(2.0, 0.18, 0.9), bedM, L / 2 - 1.5, fy + 0.54, bz); S.part(boxGeo(0.45, 0.12, 0.6), pillowM, L / 2 - 0.65, fy + 0.68, bz); }
+  for (let i = 0; i < 3; i++) S.box(0.55, 1.8, 0.5, M.blue, -1.5 + i * 0.6, fy, D / 2 - 0.45, 0, { m: 'metal' });
+  S.box(1.6, 0.75, 0.7, M.woodDark, -3.4, fy, -D / 2 + 0.6, 0, { m: 'wood' }); S.part(boxGeo(0.4, 0.25, 0.3), M.machineDark, -3.6, fy + 0.9, -D / 2 + 0.6); S.part(boxGeo(0.06, 0.06, 0.02), M.emCyan, -3.5, fy + 0.95, -D / 2 + 0.44);
+  S.part(boxGeo(3.0, 0.01, 2.0), rugM, 1.5, fy + 0.04, -0.8);
+  // lights
+  const lights = [];
+  for (const [x, y, z] of [[lx, y0 + 2.9, -1.5], [4.2, y0 + 2.9, -2.4], [4.2, y0 + 2.9, 3.0], [2, fy + 2.9, -1], [-3, fy + 2.9, 2]]) { S.part(boxGeo(0.5, 0.06, 0.5), M.emWarm, x, y, z); const Lp = new THREE.PointLight(0xffd8a0, 5, 9, 2); Lp.position.copy(S.world(x, y - 0.2, z)); root.add(Lp); lights.push(Lp); }
+  // ---- carport with a parking spot, yard sandbags, mailbox-style sign
+  const C = new P.Site(W, -50, 0, -14, 0);
+  C.box(8, 0.15, 7, M.concrete, 0, -0.05, 0, 0, { ts: 4 });
+  for (const [x, z] of [[-3.8, -3.3], [3.8, -3.3], [-3.8, 3.3], [3.8, 3.3]]) C.box(0.18, 3.2, 0.18, M.steel, x, 0, z, 0, { m: 'metal' });
+  C.part(scaleUV(boxGeo(8.4, 0.08, 7.4), 1), M.corr, 0, 3.25, 0, 0.04); C.col(8.4, 0.3, 7.4, 0, 3.15, 0, 0, 'metal');
+  C.box(2.2, 1.1, 0.6, M.red, -3.0, 0, 2.9, 0, { m: 'metal' }); for (let i = 0; i < 4; i++) C.part(boxGeo(0.35, 0.45, 0.16), M.green, 2.2 + (i % 2) * 0.4, 0.22 + Math.floor(i / 2) * 0.45, 3.0);
+  for (let i = 0; i < 6; i++) P.barrier(W, -63 + i * 3.1, 0, 19, 0, 'sandbags', rand);
+  return { rackSlots, mapBoard, lights, garage: new THREE.Vector3(-50, 0, -14), garageYaw: 0, door: S.world(0, 0, -D / 2 - 1.5) };
 }

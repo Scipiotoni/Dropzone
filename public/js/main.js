@@ -16,6 +16,7 @@ import { resetEnemyIds, TYPE_BY_CODE, SHOT_KINDS } from './enemies.js';
 import { LootContainer, Pack, rollLoot, entryName, CONTAINER_INFO } from './loot.js';
 import { Drone, Crawler, Strider, Sentinel, Raider } from './enemies.js';
 import { gunSound } from './player.js';
+import { buildGun } from './guns.js';
 import { ITEMS, WEAPONS, MODS, PIECES, PIECE_ORDER, DEFAULT_MODS, entryKg } from './items.js';
 import { worldMats } from './props.js';
 import { boxGeo, cylGeo } from './geom.js';
@@ -47,7 +48,7 @@ class Game {
     this.scene = this.engine.scene; this.engine.attach();
     this.input = new Input(this.engine.renderer.domElement);
     this.ui = new UI(this);
-    this.settings = { sens: 1, vol: 0.7, quality: 'high', fov: 72, ...(store.get(SET_KEY) || {}) };
+    this.settings = { sens: 1, vol: 0.7, quality: 'high', fov: 72, view: 'third', ...(store.get(SET_KEY) || {}) };
     this.engine.baseFov = this.settings.fov; audio.setVolume(this.settings.vol); if (this.settings.quality !== 'high') this.engine.setQuality(this.settings.quality);
     this.mode = 'menu'; this.time = 0; this.enemies = []; this.rockets = []; this.raidLoot = []; this.shakeAmt = 0; this.vehicles = []; this.containers = []; this.myParked = new Set();
     this.ai = new Director(this); this.net = new Net(this); this.audio = audio;
@@ -155,10 +156,18 @@ class Game {
   toBase() {
     this.cleanupRaid(); this.mode = 'base'; this.setWorld(this.base, 'base'); this.ui.hideMenu(); this.ui.show(true);
     this.base.build.load(this.profile.base); this.syncPlayerFromProfile();
-    const P = this.player; P.hp = P.maxHp; P.spawn(this.base.spawn, this.base.spawnYaw); P.op.root.visible = true; P.reattach(this.scene); P.vehicle = null; P.seat = null; P.hidden = false;
+    const P = this.player; P.hp = P.maxHp; P.spawn(this.base.spawn, this.base.spawnYaw); P.fp = this.settings.view === 'first'; P.op.root.visible = true; P.reattach(this.scene); P.vehicle = null; P.seat = null; P.hidden = false;
     this.build = { active: false, sel: 0, rot: 0 }; document.getElementById('hud').classList.remove('building'); this.ui.buildBar(null); this.base.build.showGhost(null); this.ui.setRaidInfo('Haven', null, '');
-    this.ui.setHint('<b>HAVEN</b> · Tab: loadout & stash · B: build mode · E: consoles & benches<br>Use the <b>Flight Ops Console</b> in the hangar to fly into the hotzone. Check the <b>Threat Intel</b> terminal to see what the enemy has learned about you.');
-    this.save(); this.net.pushLobby();
+    this.ui.setHint('<b>HAVEN</b> · Your house is right in front of you: walk in, go upstairs, check the armory wall. The Humvee in the carport drives (E).<br>Tab: loadout & stash · B: build · V: first/third person · E: interact. Use the <b>Flight Ops Console</b> in the hangar to fly into the hotzone. Check the <b>Threat Intel</b> terminal to see what the enemy has learned about you.');
+    this.setupHome(); this.save(); this.net.pushLobby();
+  }
+  // your home: a drivable Humvee in the carport, your stash weapons on the armory wall, the hotzone map on the board
+  setupHome() {
+    const H = this.base.home; if (!H) return;
+    for (const v of this.vehicles) v.remove(); this.vehicles = [new Vehicle(this, 900, 'ltv', H.garage.clone(), H.garageYaw, 0)];
+    if (this.homeDeco) this.base.root.remove(this.homeDeco); const g = this.homeDeco = new THREE.Group(); this.base.root.add(g);
+    this.profile.stash.weapons.slice(0, H.rackSlots.length).forEach((w, i) => { const gm = buildGun(w.id, w.mods); const s = H.rackSlots[i]; gm.group.position.copy(s.pos); gm.group.rotation.set(0, s.yaw + Math.PI / 2, 0); gm.group.scale.setScalar(0.9); g.add(gm.group); });
+    if (this.mapImage) { const t = new THREE.CanvasTexture(this.mapImage); t.colorSpace = THREE.SRGBColorSpace; const m = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), new THREE.MeshStandardMaterial({ map: t, roughness: 0.8 })); m.position.copy(H.mapBoard.pos); m.rotation.y = H.mapBoard.yaw; g.add(m); }
   }
   makeMapImage(W) {
     const N = 640, C = document.createElement('canvas'); C.width = C.height = N; const x = C.getContext('2d'); const img = x.createImageData(N, N); const T = W.terrain;
@@ -177,7 +186,7 @@ class Game {
   }
   // ------------------------------------------------------------------ raid lifecycle
   async startRaid(zoneId) {
-    const z = DROP_ZONES.find((d) => d.id === zoneId);
+    const z = DROP_ZONES.find((d) => d.id === zoneId); if (this.player.vehicle) this.exitVehicle(true);
     this.ui.fade(true); this.input.unlock(); this.mode = 'loading';
     const session = await this.net.joinRaid();
     await new Promise((r) => setTimeout(r, 500));
@@ -361,6 +370,7 @@ class Game {
       if (this.raid.extract?.landed) consider(this.heliModel.position.clone().setY(this.heliModel.position.y + 1.5), 7, { kind: 'board', label: 'Board helicopter', time: 0.4 });
     } else if (this.mode === 'base') {
       for (const i of this.base.interact) consider(i.pos, 3, { kind: i.kind, label: i.label, time: 0 });
+      for (const v of this.vehicles) { if (!v.alive) continue; const seat = v.freeSeat(); if (seat >= 0) consider(v.pos.clone(), ENTER_RANGE + v.def.half[2] * 0.6, { kind: 'vehicle', v, seat, label: `${seat === 0 ? 'Drive' : 'Ride in'} ${v.def.name}`, time: 0 }); }
       consider(this.baseHeli.position.clone().setY(1.5), 6, { kind: 'launch', label: 'Board helicopter (Flight Ops)', time: 0 });
       for (const p of this.base.build.pieces) { const st = PIECES[p.type].station; if (!st || !p.obj) continue; consider(p.obj.position.clone().setY(p.obj.position.y + 1), 3, { kind: 'station', st, label: `Use ${PIECES[p.type].name}`, time: 0 }); }
     }
@@ -422,6 +432,8 @@ class Game {
   // ------------------------------------------------------------------ per-frame
   frame(dt) {
     this.time += dt; const I = this.input, P = this.player, ui = this.ui;
+    if (I.locked) { const [ex, ey] = I.extraLook(dt); I.mx += ex; I.my += ey; }
+    this.softHint();
     this.net.update(dt);
     if (this.mode === 'menu' || this.mode === 'loading') { const t = this.time * 0.05; this.engine.camera.position.set(Math.sin(t) * 40, 14, -10 + Math.cos(t) * 40); this.engine.camera.lookAt(0, 3, -30); this.engine.followSun(new THREE.Vector3(0, 0, -20)); this.base.build.update(dt, this.time); this.idleHeli(dt); if (!this.noRender) this.engine.render(dt, this.time); ui.updateOnline?.(); I.endFrame(); return; }
     if (!ui.isOpen()) {
@@ -432,7 +444,7 @@ class Game {
     this.wasLocked = I.locked;
     const frozen = ui.isOpen() || this.mode === 'extracted';
     if (this.mode === 'heli') this.updateHeliRide(dt);
-    else if (P.vehicle && this.mode === 'raid') { if (!frozen) this.updateInVehicle(dt); if (P.seat > 0 && !frozen) P.update(dt, I, { frozen: false, seated: true }); }
+    else if (P.vehicle && (this.mode === 'raid' || this.mode === 'base')) { if (!frozen) this.updateInVehicle(dt); if (P.seat > 0 && !frozen) P.update(dt, I, { frozen: false, seated: true }); }
     else if (this.mode === 'base' || this.mode === 'raid' || this.mode === 'dead') {
       if (this.mode === 'base' && !frozen) this.updateBuild(dt);
       P.update(dt, I, { frozen, build: this.build?.active });
@@ -443,7 +455,7 @@ class Game {
       else { ui.prompt(null); this.holdT = 0; }
     } else ui.prompt(null);
     if (this.raid) this.updateRaid(dt);
-    if (this.mode === 'base') { this.base.build.update(dt, this.time); this.idleHeli(dt); }
+    if (this.mode === 'base') { this.base.build.update(dt, this.time); this.idleHeli(dt); for (const v of this.vehicles) v.update(dt, P.vehicle === v && P.seat === 0 ? this.input : null); }
     const cam = this.engine.camera; audio.listener.x = cam.position.x; audio.listener.y = cam.position.y; audio.listener.z = cam.position.z; audio.listener.yaw = -new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ').y * -1;
     this.ai.update(dt);
     this.fx.update(dt, this.scene.fog);
@@ -452,6 +464,11 @@ class Game {
     ui.update(dt);
     if (!this.noRender) this.engine.render(dt, this.time);
     I.endFrame();
+  }
+  softHint() {
+    let el = document.getElementById('softhint'); const on = this.input.soft && this.input.softActive && this.mode !== 'menu';
+    if (!el) { el = document.createElement('div'); el.id = 'softhint'; el.textContent = 'Mouse capture is not available in this frame: move the mouse to look, push against a screen edge to keep turning (or use the arrow keys). Esc releases the mouse.'; document.body.appendChild(el); }
+    el.hidden = !on || this.time - (this.softShown ??= this.time) > 20;
   }
   idleHeli(dt) { const u = this.baseHeli?.userData; if (u) { u.rotor.rotation.y += dt * 1.2; u.tailR.rotation.x += dt * 3; } }
   updateHeliRide(dt) {

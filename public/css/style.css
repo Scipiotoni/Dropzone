@@ -179,6 +179,10 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 #panel:not(.hidden) ~ #online .who, #menu:not(.hidden) ~ #online .who { display: block; margin-top: 4px; font-weight: 500; }
 .callsign { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; margin-bottom: 8px; }
 .callsign label { font-size: 13px; letter-spacing: 0.12em; color: var(--dim); text-transform: uppercase; }
+.callsign select { background: #111; color: var(--txt); border: 1px solid var(--line2); padding: 8px 10px; font: 600 15px var(--font); }
 .callsign input { background: #111; color: var(--txt); border: 1px solid var(--line2); padding: 8px 10px; font: 600 16px var(--font); }
 .callsign small { grid-column: 2; color: var(--dim); }
 #feed { top: 60px; }
+
+body.softlook #game canvas { cursor: none; }
+#softhint { position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); font: 500 12px var(--font); color: var(--dim); pointer-events: none; z-index: 4; }

@@ -7,21 +7,39 @@ import { WEAPONS, ITEMS, weaponStats, DEFAULT_MODS, encumbrance, entryKg, BODY_K
 import { WeaponAnimator } from './anim.js';
 import { audio } from './audio.js';
 
+// Mouse capture: real pointer lock where the browser allows it; otherwise (embedded frames, some app views) a "soft"
+// capture: the hidden cursor's movement steers the camera, the screen edges keep turning, and arrow keys look too.
 export class Input {
   constructor(dom) {
     this.keys = new Set(); this.pressed = new Set(); this.mx = 0; this.my = 0; this.buttons = 0; this.clicked = 0; this.wheel = 0; this.locked = false; this.dom = dom;
-    addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT') return; if (!this.keys.has(e.code)) this.pressed.add(e.code); this.keys.add(e.code); if (['Tab', 'Space'].includes(e.code) || (e.code.startsWith('Arrow'))) e.preventDefault(); });
+    this.soft = false; this.softActive = false; this.cx = innerWidth / 2; this.cy = innerHeight / 2;
+    addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT') return; if (!this.keys.has(e.code)) this.pressed.add(e.code); this.keys.add(e.code); if (['Tab', 'Space'].includes(e.code) || (e.code.startsWith('Arrow'))) e.preventDefault(); if (e.code === 'Escape' && this.softActive) { this.softActive = false; this.update(); } });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
-    addEventListener('blur', () => { this.keys.clear(); this.buttons = 0; });
-    addEventListener('mousemove', (e) => { if (this.locked) { this.mx += e.movementX; this.my += e.movementY; } });
+    addEventListener('blur', () => { this.keys.clear(); this.buttons = 0; if (this.softActive) { this.softActive = false; this.update(); } });
+    addEventListener('mousemove', (e) => { this.cx = e.clientX; this.cy = e.clientY; if (this.locked) { this.mx += e.movementX; this.my += e.movementY; } });
     addEventListener('mousedown', (e) => { if (!this.locked) return; this.buttons |= 1 << e.button; this.clicked |= 1 << e.button; });
     addEventListener('mouseup', (e) => { this.buttons &= ~(1 << e.button); });
     addEventListener('wheel', (e) => { if (this.locked) this.wheel += Math.sign(e.deltaY); }, { passive: true });
     addEventListener('contextmenu', (e) => e.preventDefault());
-    document.addEventListener('pointerlockchange', () => { this.locked = document.pointerLockElement === dom; if (!this.locked) { this.buttons = 0; this.keys.clear(); } });
+    document.addEventListener('pointerlockchange', () => { this.update(); if (!this.locked) { this.buttons = 0; this.keys.clear(); } });
+    document.addEventListener('pointerlockerror', () => this.enableSoft());
   }
-  lock() { if (!this.locked) this.dom.requestPointerLock?.(); }
-  unlock() { if (document.pointerLockElement) document.exitPointerLock(); }
+  update() { this.locked = document.pointerLockElement === this.dom || (this.soft && this.softActive); document.body.classList.toggle('softlook', this.soft && this.softActive); }
+  enableSoft() { this.soft = true; this.softActive = true; this.update(); }
+  lock() {
+    if (this.locked) return;
+    if (this.soft) { this.softActive = true; this.update(); return; }
+    try { const p = this.dom.requestPointerLock?.(); if (p && p.catch) p.catch(() => this.enableSoft()); if (!this.dom.requestPointerLock) this.enableSoft(); } catch (e) { this.enableSoft(); }
+    clearTimeout(this.lockTO); this.lockTO = setTimeout(() => { if (document.pointerLockElement !== this.dom && !this.locked) this.enableSoft(); }, 500);
+  }
+  unlock() { if (document.pointerLockElement) document.exitPointerLock(); if (this.softActive) { this.softActive = false; this.update(); } }
+  // extra look input for soft capture: screen-edge turning + arrow keys (pixels-equivalent per second)
+  extraLook(dt) {
+    let x = 0, y = 0;
+    if (this.keys.has('ArrowLeft')) x -= 1; if (this.keys.has('ArrowRight')) x += 1; if (this.keys.has('ArrowUp')) y -= 1; if (this.keys.has('ArrowDown')) y += 1;
+    if (this.soft && this.softActive) { const ex = 0.07 * innerWidth, ey = 0.08 * innerHeight; if (this.cx < ex) x -= 1 - this.cx / ex; if (this.cx > innerWidth - ex) x += 1 - (innerWidth - this.cx) / ex; if (this.cy < ey) y -= (1 - this.cy / ey) * 0.6; if (this.cy > innerHeight - ey) y += (1 - (innerHeight - this.cy) / ey) * 0.6; }
+    return [x * 700 * dt, y * 450 * dt];
+  }
   down(c) { return this.keys.has(c); }
   hit(c) { return this.pressed.has(c); }
   endFrame() { this.pressed.clear(); this.mx = this.my = 0; this.clicked = 0; this.wheel = 0; }
@@ -108,7 +126,7 @@ export class Player {
       this.yaw -= input.mx * sens; this.pitch -= input.my * sens; this.pitch = THREE.MathUtils.clamp(this.pitch, -1.45, 1.45);
     }
     const rec = Math.min(1, dt * 7); this.pitch += this.kick.y * rec; this.yaw += this.kick.x * rec; this.kick.multiplyScalar(1 - rec);
-    if (canAct && input.hit('KeyV')) this.fp = !this.fp;
+    if (canAct && input.hit('KeyV')) { this.fp = !this.fp; this.game.settings.view = this.fp ? 'first' : 'third'; this.game.saveSettings(); }
     if (canAct && input.hit('KeyC')) this.crouch = !this.crouch;
     const seated = !!opts.seated;
     const f = seated ? 0 : (input.down('KeyW') ? 1 : 0) - (input.down('KeyS') ? 1 : 0), s = seated ? 0 : (input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0);
