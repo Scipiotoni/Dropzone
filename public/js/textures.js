@@ -94,28 +94,28 @@ const def = (name, fn) => { Object.defineProperty(LIB, name, { get() { const v =
 export const TEX = LIB;
 
 def('grass', () => { const f = fbm(11, 4, 6), g = fbm(12, 32, 3), w = worley(13, 24), bl = fbm(14, 128, 3), bl2 = worley(15, 90);
-  return bake(512, (u, v) => { const n = f(u, v), b = g(u, v), [d1] = w(u, v); const dry = smooth(0.45, 0.7, n);
+  return bake(1024, (u, v) => { const n = f(u, v), b = g(u, v), [d1] = w(u, v); const dry = smooth(0.45, 0.7, n);
     const [e1, e2] = bl2(u, v); const blade = smooth(0.35, 0.75, bl(u, v)) * 0.6 + smooth(0.0, 0.25, e2 - e1) * 0.4;
     let c = lerp3(hex(0x45552a), hex(0x8a8648), dry); c = lerp3(c, hex(0x3a3a24), smooth(0.2, 0.0, d1) * 0.5);
     c = c.map((k) => k * (0.72 + blade * 0.4 + b * 0.12));
     return { h: blade * 0.5 + b * 0.4 + n * 0.3, c, r: 0.94 - blade * 0.06 }; }, 1.4); });
 def('dirt', () => { const f = fbm(21, 4, 6), w = worley(22, 18), g = fbm(23, 64, 2);
-  return bake(512, (u, v) => { const n = f(u, v), [d1, d2] = w(u, v), peb = smooth(0.35, 0.15, d1) * smooth(0.5, 0.75, g(u, v));
+  return bake(1024, (u, v) => { const n = f(u, v), [d1, d2] = w(u, v), peb = smooth(0.35, 0.15, d1) * smooth(0.5, 0.75, g(u, v));
     let c = lerp3(hex(0x5a4632), hex(0x8a7154), n); c = lerp3(c, hex(0x857a6a), peb * 0.5);
     c = c.map((k) => k * (0.85 + g(u, v) * 0.3));
     return { h: n * 0.6 + peb * 0.8 + (d2 - d1) * 0.1, c, r: 0.95 - peb * 0.2 }; }, 2.5); });
 def('rock', () => { const f = fbm(31, 3, 7), cr = worley(32, 12), g = fbm(33, 48, 3), w2 = fbm(34, 6, 5);
-  return bake(512, (u, v) => { const n = f(u, v), [d1, d2] = cr(u + w2(u, v) * 0.08, v + w2(v, u) * 0.08), crack = smooth(0.05, 0.0, d2 - d1) * smooth(0.35, 0.6, w2(u, v)), s = g(u, v);
+  return bake(1024, (u, v) => { const n = f(u, v), [d1, d2] = cr(u + w2(u, v) * 0.08, v + w2(v, u) * 0.08), crack = smooth(0.05, 0.0, d2 - d1) * smooth(0.35, 0.6, w2(u, v)), s = g(u, v);
     let c = lerp3(hex(0x5c5a55), hex(0x9c978c), n); c = lerp3(c, hex(0x6b5a44), smooth(0.55, 0.8, s) * 0.4); c = c.map((k) => k * (1 - crack * 0.4) * (0.85 + s * 0.25));
     const lich = smooth(0.62, 0.72, f(u * 0.5 + 0.3, v)); c = lerp3(c, hex(0x7a8050), lich * 0.35);
     return { h: n * 1.2 - crack * 0.6 + s * 0.2, c, r: 0.85 + crack * 0.1 }; }, 4); });
 def('asphalt', () => { const f = fbm(41, 4, 5), w = worley(42, 40), cr = worley(43, 5), g = fbm(44, 128, 2);
-  return bake(512, (u, v) => { const n = f(u, v), [d1] = w(u, v), [c1, c2] = cr(u, v), crack = smooth(0.035, 0.0, c2 - c1) * smooth(0.45, 0.6, n);
+  return bake(1024, (u, v) => { const n = f(u, v), [d1] = w(u, v), [c1, c2] = cr(u, v), crack = smooth(0.03, 0.0, c2 - c1) * smooth(0.55, 0.68, n);
     const agg = smooth(0.3, 0.1, d1) * g(u, v); let c = hex(0x3a3a3a).map((k) => k * (0.75 + n * 0.45) + agg * 0.12);
     c = c.map((k) => k * (1 - crack * 0.7)); const patch = smooth(0.66, 0.7, f(u + 0.5, v)); c = lerp3(c, hex(0x222222), patch * 0.6);
     return { h: agg * 0.5 + n * 0.2 - crack * 0.8, c, r: 0.88 - patch * 0.15 + agg * 0.05 }; }, 3); });
 def('concrete', () => { const f = fbm(51, 4, 7), p = worley(52, 30), st = fbm(53, 2, 4), g = fbm(54, 128, 2);
-  return bake(512, (u, v) => { const n = f(u, v), [d1] = p(u, v), pore = smooth(0.12, 0.0, d1) * g(u, v);
+  return bake(1024, (u, v) => { const n = f(u, v), [d1] = p(u, v), pore = smooth(0.12, 0.0, d1) * g(u, v);
     const stain = smooth(0.5, 0.85, st(u, v * 0.5)) * smooth(0, 1, v); // streaks running down
     let c = lerp3(hex(0x8e8b84), hex(0xb2aea4), n); c = lerp3(c, hex(0x5a554a), stain * 0.45); c = c.map((k) => k * (1 - pore * 0.35));
     const form = (Math.abs(((v * 4) % 1) - 0.5) < 0.006) ? 0.85 : 1; c = c.map((k) => k * form); // formwork seams

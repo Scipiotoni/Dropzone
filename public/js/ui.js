@@ -2,7 +2,7 @@
 // build bar, pause and raid results.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { ITEMS, WEAPONS, MODS, RECIPES, PIECES, PIECE_ORDER, RARITY, weaponStats, modFits, DEFAULT_MODS } from './items.js';
+import { ITEMS, WEAPONS, MODS, RECIPES, PIECES, PIECE_ORDER, RARITY, weaponStats, modFits, DEFAULT_MODS, entryKg, encumbrance } from './items.js';
 import { entryName, entryRarity, entryIcon } from './loot.js';
 import { buildGun } from './guns.js';
 import { DROP_ZONES, EXTRACTS } from './hotzone.js';
@@ -45,7 +45,8 @@ export class UI {
     if (w) { $('#wname').textContent = WEAPONS[w.id].name + (w.stats.auto ? ' · AUTO' : ' · SEMI'); $('#mag').textContent = w.mag; $('#mag').classList.toggle('low', w.mag <= Math.ceil(w.stats.mag * 0.25)); $('#reserve').textContent = G.pack.count(w.stats.ammo); }
     else { $('#wname').textContent = 'Unarmed'; $('#mag').textContent = '–'; $('#reserve').textContent = '–'; }
     $('#wslots').innerHTML = P.weapons.map((x, i) => x ? `<div class="${i === P.slot ? 'on' : ''}">${i + 1} · ${WEAPONS[x.id].short}</div>` : '').join('');
-    $('#packcap').textContent = `Backpack ${G.pack.used()}/${G.pack.slots}` + (P.reloadT >= 0 ? ' · RELOADING' : '');
+    const E = P.enc; $('#packcap').innerHTML = `Backpack ${G.pack.used()}/${G.pack.slots} · <span style="color:${E.kg > 42 ? 'var(--red)' : E.kg > 30 ? 'var(--acc2)' : 'var(--dim)'}">${E.kg.toFixed(1)} kg ${E.band}</span>` + (P.reloadT >= 0 ? ' · RELOADING' : '');
+    this.updateOnline();
     // crosshair spread
     const px = 6 + Math.tan(THREE.MathUtils.degToRad(P.spreadNow + (P.spreadBloom || 0))) * innerHeight / (2 * Math.tan(THREE.MathUtils.degToRad(G.engine.camera.fov / 2)));
     const ch = $('#crosshair'); for (const [k, x, y] of [['t', 0, -px - 8], ['b', 0, px], ['l', -px - 8, 0], ['r', px, 0]]) { const e = ch.querySelector('.' + k); e.style.transform = `translate(${x}px,${y}px)`; }
@@ -74,10 +75,10 @@ export class UI {
   tip(html) { if (!html) { this.tipEl.classList.add('hidden'); return; } this.tipEl.innerHTML = html; this.tipEl.classList.remove('hidden'); }
   entryTip(e) {
     if (e.weapon) { const s = weaponStats(e.weapon); const W = WEAPONS[e.weapon.id]; const mods = Object.entries(e.weapon.mods || {}).filter(([, m]) => m && !MODS[m]?.builtin).map(([, m]) => MODS[m].name);
-      return `<h4 style="color:${RARITY[W.rarity]}">${W.name}</h4><p>${W.cls} · ${ITEMS[W.ammo].name}</p><div class="st">DMG ${Math.round(s.damage)}${s.pellets > 1 ? '×' + s.pellets : ''} · ${s.rpm} RPM · MAG ${s.mag}<br>Recoil ${s.recoil.toFixed(2)} · Spread ${s.spread.toFixed(1)}°</div>${mods.length ? `<p>${mods.join(', ')}</p>` : ''}<p>${W.desc}</p>`; }
+      return `<h4 style="color:${RARITY[W.rarity]}">${W.name}</h4><p>${W.cls} · ${ITEMS[W.ammo].name} · ${s.kg.toFixed(2)} kg</p><div class="st">DMG ${Math.round(s.damage)}${s.pellets > 1 ? '×' + s.pellets : ''} · ${s.rpm} RPM · MAG ${s.mag}<br>Recoil ${s.recoil.toFixed(2)} · Spread ${s.spread.toFixed(1)}°</div>${mods.length ? `<p>${mods.join(', ')}</p>` : ''}<p>${W.desc}</p>`; }
     if (e.mod) { const m = MODS[e.mod]; const fx = ['recoil', 'hrecoil', 'spread', 'ads', 'reload', 'damage', 'range', 'speed', 'mag'].filter((k) => m[k]).map((k) => `${k} ×${m[k]}`).join(' · ');
-      return `<h4 style="color:${RARITY[m.rarity || 'common']}">${m.name}</h4><p>${m.slot.toUpperCase()} attachment${m.only ? ' · ' + m.only.map((w) => WEAPONS[w].short).join('/') + ' only' : ''}</p><div class="st">${fx || (m.zoom ? 'Zoom ' + m.zoom + '×' : '')}</div><p>${m.desc || ''}</p>`; }
-    const it = ITEMS[e.id]; return `<h4 style="color:${RARITY[it.rarity]}">${it.name}</h4><p>${it.desc}</p>`;
+      return `<h4 style="color:${RARITY[m.rarity || 'common']}">${m.name}</h4><p>${(m.kg || 0.1).toFixed(2)} kg · ${m.slot.toUpperCase()} attachment${m.only ? ' · ' + m.only.map((w) => WEAPONS[w].short).join('/') + ' only' : ''}</p><div class="st">${fx || (m.zoom ? 'Zoom ' + m.zoom + '×' : '')}</div><p>${m.desc || ''}</p>`; }
+    const it = ITEMS[e.id]; return `<h4 style="color:${RARITY[it.rarity]}">${it.name}</h4><p>${it.desc}</p><div class="st">${(it.kg || 0.1) < 0.05 ? (it.kg * 1000).toFixed(0) + ' g each' : (it.kg || 0.1).toFixed(2) + ' kg each'}${e.n > 1 ? ` · ${entryKg(e).toFixed(2)} kg total` : ''}</div>`;
   }
   slotHTML(e, i, extra = '') { if (!e) return `<div class="slot empty"></div>`; return `<div class="slot" data-i="${i}" ${extra} style="--rc:${entryRarity(e)}"><div class="ic">${entryIcon(e)}</div><div class="n">${e.n && e.n > 1 ? e.n : ''}</div><div class="nm">${esc(e.weapon ? WEAPONS[e.weapon.id].short : entryName(e))}</div></div>`; }
   bindSlots(root, sel, list, onClick) {
@@ -102,7 +103,8 @@ export class UI {
         <div class="body"><div class="col" style="width:290px;flex-shrink:0"><h3>Equipment</h3><div class="equip">${eqW(0)}${eqW(1)}
           <div class="eq" data-eq="vest"><label>Armor</label><div class="v">${P.vestId ? `${ITEMS[P.vestId].name}<small>${Math.ceil(P.armor)}/${P.maxArmor} armor</small>` : '<small>None</small>'}</div></div>
           <div class="eq" data-eq="pack"><label>Backpack</label><div class="v">${ITEMS[P.packId].name}<small>${pack.slots} slots</small></div></div></div>
-          <h3 style="margin-top:10px">Vitals</h3><div class="stats">HP ${Math.ceil(P.hp)}/${P.maxHp}<br>Ammo: ${['a9', 'a556', 'a762', 'a12'].map((a) => `${ITEMS[a].name} ${pack.count(a)}`).join('<br>')}</div></div>
+          <h3 style="margin-top:10px">Carry weight</h3>${(() => { const E = encumbrance(P.carriedKg()); const pct = Math.min(100, E.kg / 55 * 100); return `<div class="bar" style="height:8px;flex:none"><i style="transform:scaleX(${pct / 100});background:${E.kg > 42 ? 'var(--red)' : E.kg > 30 ? 'var(--acc)' : 'var(--green)'}"></i></div><div class="stats">${E.kg.toFixed(1)} kg · ${E.band}<br>Speed ×${E.speed.toFixed(2)} · Stamina drain ×${E.stamina.toFixed(2)}${E.noSprint ? '<br><span class="warn">Too heavy to sprint</span>' : ''}</div>`; })()}
+          <h3 style="margin-top:10px">Vitals</h3><div class="stats">HP ${Math.ceil(P.hp)}/${P.maxHp}<br>Ammo: ${Object.keys(ITEMS).filter((a) => ITEMS[a].type === 'ammo' && pack.count(a)).map((a) => `${ITEMS[a].name} ${pack.count(a)}`).join('<br>') || 'none'}</div></div>
         <div class="col" style="flex:1"><h3>Backpack <span>${pack.used()}/${pack.slots}</span></h3><div class="grid" id="packg">${padded.map((e, i) => this.slotHTML(e, i)).join('')}</div><small style="color:var(--dim)">${base ? 'Click: return to stash' : 'Click weapon: equip · Click item: drop'}</small></div>${right}</div></div>`;
       const p = this.panel(html);
       p.querySelectorAll('.eq').forEach((el) => { el.onclick = () => { G.unequip(el.dataset.eq); render(); }; });
@@ -114,8 +116,8 @@ export class UI {
       });
       if (base) this.bindSlots(p, '#stashg', G.stashEntries(), (e, i, ev, right) => { G.stashToPack(e, ev?.shiftKey, right); render(); });
       if (container) {
-        this.bindSlots(p, '#contg', container.contents, (e, i) => { if (G.pack.add(e) === 0) { container.contents.splice(i, 1); this.feed(`+ ${entryName(e)}${e.n > 1 ? ' ×' + e.n : ''}`, 'loot'); } else { const left = G.pack.add({ ...e }); this.toast('Backpack full'); } render(); });
-        const ta = p.querySelector('#takeall'); if (ta) ta.onclick = () => { for (let i = container.contents.length - 1; i >= 0; i--) { const e = container.contents[i]; const left = G.pack.add(e); if (left === 0) { container.contents.splice(i, 1); this.feed(`+ ${entryName(e)}${e.n > 1 ? ' ×' + e.n : ''}`, 'loot'); } else if (e.n) e.n = left; } if (container.contents.length) this.toast('Backpack full'); render(); };
+        this.bindSlots(p, '#contg', container.contents, (e, i) => { if (G.pack.add(e) === 0) { container.contents.splice(i, 1); G.takeFromContainer(container, e); this.feed(`+ ${entryName(e)}${e.n > 1 ? ' ×' + e.n : ''} (${entryKg(e).toFixed(1)} kg)`, 'loot'); } else this.toast('Backpack full'); render(); });
+        const ta = p.querySelector('#takeall'); if (ta) ta.onclick = () => { for (let i = container.contents.length - 1; i >= 0; i--) { const e = container.contents[i]; const left = G.pack.add(e); if (left === 0) { container.contents.splice(i, 1); G.takeFromContainer(container, e); this.feed(`+ ${entryName(e)}${e.n > 1 ? ' ×' + e.n : ''}`, 'loot'); } else if (e.n) e.n = left; } if (container.contents.length) this.toast('Backpack full'); render(); };
       }
     };
     render();
@@ -189,16 +191,16 @@ export class UI {
       const z = DROP_ZONES.find((d) => d.id === sel); const P = G.player; const lo = G.profile.loadout;
       const ammo = P.weapons.filter(Boolean).map((w) => `${WEAPONS[w.id].short}: ${G.pack.count(w.stats.ammo)} rds`).join(' · ');
       const warns = []; if (!P.weapons[0] && !P.weapons[1]) warns.push('No weapon equipped!'); if (P.weapons.some((w) => w && G.pack.count(w.stats.ammo) === 0)) warns.push('A weapon has no spare ammo in your backpack.'); if (!['bandage', 'medkit', 'stim'].some((k) => G.pack.count(k))) warns.push('No medical supplies packed.');
-      const html = `<div class="win"><header><h2>Drop Pod · Ashgrove Hotzone</h2><span class="sub">Choose an insertion point. Two extraction LZs will be active.</span><button class="ghost x" data-close>Cancel</button></header>
+      const html = `<div class="win"><header><h2>Flight Ops · Ashgrove Hotzone</h2><span class="sub">Pick an insertion point. You fly in by helicopter and fast-rope down. Two extraction LZs will be active.</span><button class="ghost x" data-close>Cancel</button></header>
         <div class="body">${this.mapHTML([...DROP_ZONES.map((d) => ({ id: d.id, x: d.pos[0], z: d.pos[1], cls: d.id === sel ? 'sel' : '', label: `${d.name}<br><span class="dn">${'▲'.repeat(d.danger)}</span>` })), ...EXTRACTS.map((e) => ({ x: e.pos[0], z: e.pos[1], cls: 'ex', label: e.name }))])}
         <div class="zoneinfo"><div class="card"><h4>${z.name}</h4><div class="dn" style="color:var(--red)">${'▲'.repeat(z.danger)}<span style="color:var(--dim)">${'▲'.repeat(4 - z.danger)}</span> Threat</div><p>${z.desc}</p></div>
-          <div class="card"><b>Loadout</b><div class="stats">${P.weapons.map((w, i) => w ? `${i ? 'Secondary' : 'Primary'}: ${WEAPONS[w.id].name}` : '').filter(Boolean).join('<br>') || 'Unarmed'}<br>Armor: ${P.vestId ? ITEMS[P.vestId].name : 'none'} · Pack: ${ITEMS[P.packId].name}<br>${ammo}<br>Backpack ${G.pack.used()}/${G.pack.slots}</div>
+          <div class="card"><b>Loadout</b><div class="stats">${P.weapons.map((w, i) => w ? `${i ? 'Secondary' : 'Primary'}: ${WEAPONS[w.id].name}` : '').filter(Boolean).join('<br>') || 'Unarmed'}<br>Armor: ${P.vestId ? ITEMS[P.vestId].name : 'none'} · Pack: ${ITEMS[P.packId].name}<br>${ammo}<br>Backpack ${G.pack.used()}/${G.pack.slots} · Carry weight ${P.carriedKg().toFixed(1)} kg (${encumbrance(P.carriedKg()).band})</div>
           ${warns.map((w) => `<div class="warn">⚠ ${w}</div>`).join('')}</div>
-          <div class="card" style="color:var(--dim);font-size:14px">Raid time 25:00. Reach an active LZ, call the lift at the console and survive until it lands. Dying loses everything you carried in.</div>
-          <div style="display:flex;gap:8px"><button id="loadout" class="ghost">Edit loadout</button><button id="go" style="flex:1">Launch drop pod</button></div></div></div></div>`;
+          <div class="card" style="color:var(--dim);font-size:14px">Raid time 25:00. ${G.net.online ? `<b style="color:var(--green)">Multiplayer:</b> you share the hotzone with other operators (${G.net.playersOnline().length} online). Other players can shoot you and loot your body.` : 'Offline: solo session.'} Reach an active LZ, call the helicopter at the console and survive until it lands. Dying loses everything you carried in.</div>
+          <div style="display:flex;gap:8px"><button id="loadout" class="ghost">Edit loadout</button><button id="go" style="flex:1">Board helicopter</button></div></div></div></div>`;
       const p = this.panel(html); this.paintMap(p.querySelector('#map canvas'));
       p.querySelectorAll('.mk[data-id]').forEach((el) => { if (el.dataset.id) el.onclick = () => { sel = el.dataset.id; audio.click(900, 0.06, 0.04); render(); }; });
-      p.querySelector('#go').onclick = () => { G.lastZone = sel; this.open = null; $('#panel').classList.add('hidden'); G.startRaid(sel); };
+      p.querySelector('#go').onclick = () => { G.lastZone = sel; this.open = null; $('#panel').classList.add('hidden'); this.tip(null); G.startRaid(sel); };
       p.querySelector('#loadout').onclick = () => this.inventory();
     };
     render();
@@ -226,16 +228,18 @@ export class UI {
     p.querySelector('#abandon')?.addEventListener('click', () => { this.close(); G.player.damage(9999, null); });
     p.querySelector('#tomenu').onclick = () => { this.open = null; $('#panel').classList.add('hidden'); G.save(); G.showMenu(); };
   }
-  settingsHTML() { const s = this.g.settings; return `<div class="settings"><label>Mouse sensitivity</label><input type="range" id="sens" min="0.3" max="3" step="0.05" value="${s.sens}"><label>Volume</label><input type="range" id="vol" min="0" max="1" step="0.05" value="${s.vol}"><label>Graphics</label><select id="qual"><option value="high" ${s.quality === 'high' ? 'selected' : ''}>High</option><option value="low" ${s.quality === 'low' ? 'selected' : ''}>Performance</option></select><label>Field of view</label><input type="range" id="fov" min="60" max="95" step="1" value="${s.fov}"></div>`; }
+  settingsHTML() { const s = this.g.settings; return `<div class="settings"><label>Mouse sensitivity</label><input type="range" id="sens" min="0.3" max="3" step="0.05" value="${s.sens}"><label>Volume</label><input type="range" id="vol" min="0" max="1" step="0.05" value="${s.vol}"><label>Graphics</label><select id="qual"><option value="ultra" ${s.quality === 'ultra' ? 'selected' : ''}>Ultra (AO, 2× res)</option><option value="high" ${s.quality === 'high' ? 'selected' : ''}>High (ambient occlusion)</option><option value="medium" ${s.quality === 'medium' ? 'selected' : ''}>Medium</option><option value="low" ${s.quality === 'low' ? 'selected' : ''}>Performance</option></select><label>Field of view</label><input type="range" id="fov" min="60" max="95" step="1" value="${s.fov}"></div>`; }
   bindSettings(p) { const G = this.g; p.querySelector('#sens').oninput = (e) => { G.settings.sens = +e.target.value; G.saveSettings(); }; p.querySelector('#vol').oninput = (e) => { G.settings.vol = +e.target.value; audio.setVolume(G.settings.vol); G.saveSettings(); }; p.querySelector('#qual').onchange = (e) => { G.settings.quality = e.target.value; G.engine.setQuality(G.settings.quality); G.saveSettings(); }; p.querySelector('#fov').oninput = (e) => { G.settings.fov = +e.target.value; G.engine.baseFov = G.settings.fov; G.saveSettings(); }; }
-  keysHTML() { return [['WASD', 'Move'], ['Shift', 'Sprint'], ['C', 'Crouch'], ['Space', 'Jump'], ['LMB / RMB', 'Fire / Aim'], ['R', 'Reload'], ['1 / 2 · Wheel', 'Switch weapon'], ['E (hold)', 'Interact / loot / salvage'], ['Q', 'Heal'], ['G', 'Insert armor plate'], ['Tab', 'Inventory'], ['M', 'Map'], ['V', 'First / third person'], ['L', 'Weapon light'], ['B', 'Build mode (base)']].map(([k, v]) => `<kbd>${k}</kbd><span>${v}</span>`).join(''); }
+  keysHTML() { return [['WASD', 'Move'], ['Shift', 'Sprint'], ['C', 'Crouch'], ['Space', 'Jump'], ['LMB / RMB', 'Fire / Aim'], ['R', 'Reload'], ['1 / 2 · Wheel', 'Switch weapon'], ['E (hold)', 'Interact / loot / salvage'], ['Q', 'Heal'], ['G', 'Insert armor plate'], ['Tab', 'Inventory'], ['M', 'Map'], ['V', 'First / third person'], ['L', 'Weapon light'], ['I', 'Inspect weapon'], ['Shift (aiming)', 'Hold breath (scopes)'], ['E near vehicle', 'Drive / ride · W/S/A/D, Space handbrake, R flip'], ['B', 'Build mode (base)']].map(([k, v]) => `<kbd>${k}</kbd><span>${v}</span>`).join(''); }
   menu(hasSave) {
     const m = $('#menu'); m.classList.remove('hidden');
     m.innerHTML = `<div class="mm"><div class="logo">DROP<span>ZONE</span></div><div class="tag">Drop into the Ashgrove hotzone. Strip it for salvage. Fight off machines and raiders. Extract alive and build up Haven.</div>
+      <div class="callsign"><label>Callsign</label><input id="cs" maxlength="16" value="${esc(this.g.net.name)}"><small>${this.g.net.online ? '<span class="ok">● Multiplayer online</span>' : 'Offline · solo'}</small></div>
       ${hasSave ? '<button id="cont">Continue</button>' : ''}<button id="new" class="${hasSave ? 'ghost' : ''}">${hasSave ? 'New game (wipe save)' : 'Start'}</button><button id="opts" class="ghost">Settings & controls</button>
       <div class="ver">Best with mouse & keyboard. Click the game to capture the mouse.<br>Progress saves automatically in this browser.</div></div>`;
+    m.querySelector('#cs').onchange = (e) => this.g.net.setName(e.target.value);
     m.querySelector('#cont')?.addEventListener('click', () => { audio.init(); m.classList.add('hidden'); this.g.continueGame(); });
-    m.querySelector('#new').onclick = () => { if (hasSave && !confirm('Wipe your stash and base and start over?')) return; audio.init(); m.classList.add('hidden'); this.g.newGame(); };
+    m.querySelector('#new').onclick = (ev) => { const b = ev.currentTarget; if (hasSave && !b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Click again to wipe your stash and base'; return; } audio.init(); m.classList.add('hidden'); this.g.newGame(); };
     m.querySelector('#opts').onclick = () => { const p = this.panel(`<div class="win" style="width:min(560px,94vw)"><header><h2>Settings</h2><button class="ghost x" data-close>Back</button></header><div class="body" style="flex-direction:column">${this.settingsHTML()}<div class="keys">${this.keysHTML()}</div></div></div>`); this.bindSettings(p); };
   }
   hideMenu() { $('#menu').classList.add('hidden'); }
@@ -243,6 +247,24 @@ export class UI {
     const bb = $('#buildbar'); if (sel === null) { bb.classList.add('hidden'); return; } bb.classList.remove('hidden');
     const lo = Math.max(0, Math.min(PIECE_ORDER.length - 9, sel - 4));
     bb.innerHTML = PIECE_ORDER.map((k, i) => { if (i < lo || i >= lo + 9) return ''; const P = PIECES[k]; const aff = Object.entries(P.cost).every(([r, n]) => this.g.stashCount(r) >= n); return `<div class="bp ${i === sel ? 'on' : ''} ${aff ? '' : 'no'}"><b>${i < 9 ? i + 1 : i === 9 ? 0 : ''}</b> ${P.name}<small>${Object.entries(P.cost).filter(([, n]) => n > 0).map(([r, n]) => `${n} ${ITEMS[r].name.split(' ')[0]}`).join(' · ')}</small></div>`; }).join('');
+  }
+  intel(lines) {
+    const G = this.g; const p = G.ai.profile;
+    this.panel(`<div class="win" style="width:min(760px,94vw)"><header><h2>Threat Intel</h2><span class="sub">What Ashgrove's hostiles have learned about how you fight.</span><button class="ghost x" data-close>Close</button></header>
+      <div class="body" style="flex-direction:column"><div class="summary">${[['Engagement range', Math.round(p.engageDist) + ' m'], ['Aggression', Math.round(p.aggression * 100) + '%'], ['Time crouched', Math.round(p.crouch * 100) + '%'], ['Static shooting', Math.round(p.camping * 100) + '%'], ['Headshot rate', Math.round(p.headshot * 100) + '%'], ['Suppressed fire', Math.round(p.suppressed * 100) + '%'], ['Vehicle use', Math.round(p.vehicle * 100) + '%'], ['Raids observed', p.raids]].map(([k, v]) => `<div class="eq"><label>${k}</label><div class="v">${v}</div></div>`).join('')}</div>
+      <h3 style="margin:6px 0 0;color:var(--dim);letter-spacing:.14em;font-size:14px">ENEMY ADAPTATIONS</h3>${lines.map((l) => `<div class="eq"><div class="v" style="font-weight:500">${esc(l)}</div></div>`).join('')}</div></div>`);
+  }
+  vehicleHud(v) {
+    let el = $('#vehhud'); if (!el) { el = document.createElement('div'); el.id = 'vehhud'; $('#hud').appendChild(el); }
+    if (!v) { el.classList.add('hidden'); $('#weaponhud').classList.remove('hidden'); return; }
+    el.classList.remove('hidden'); if (v.seat === 0) $('#weaponhud').classList.add('hidden');
+    el.innerHTML = `<div class="vname">${esc(v.name)}${v.seat ? ' · passenger' : ''}</div><div class="spd">${Math.round(v.speed * 3.6)}<small>km/h</small></div><div class="row"><label>HULL</label><div class="bar"><i class="hp" style="transform:scaleX(${Math.max(0, v.hp / v.maxHp)})"></i></div></div><div class="row"><label>FUEL</label><div class="bar"><i class="st" style="transform:scaleX(${v.fuel})"></i></div></div><div class="vk">W/S throttle · A/D steer · Space handbrake · V camera · E exit</div>`;
+  }
+  updateOnline() {
+    const G = this.g; let el = $('#online'); if (!el) { el = document.createElement('div'); el.id = 'online'; document.body.appendChild(el); }
+    if (!G.net.online) { el.innerHTML = '<i class="off"></i>Offline'; return; }
+    const list = G.net.playersOnline(); const raid = G.net.raidRoom ? G.net.remotes.size : null;
+    el.innerHTML = `<i></i>${list.length} online${raid !== null ? ` · ${raid} in your raid` : ''}<div class="who">${list.slice(0, 8).map((p) => `<span style="color:${p.color}">${esc(p.name)}${p.me ? ' (you)' : ''}</span> <small>${p.mode === 'raid' || p.mode === 'heli' ? 'in raid' : p.mode === 'base' ? 'at Haven' : ''}</small>`).join('<br>')}</div>`;
   }
   fade(on) { $('#fade').classList.toggle('on', on); }
   loading(pct, txt) { const l = $('#loading'); if (pct === null) { l.classList.add('hidden'); return; } l.classList.remove('hidden'); $('#loadbar').style.width = pct + '%'; if (txt) $('#loadtxt').textContent = txt; }

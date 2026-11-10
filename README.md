@@ -14,18 +14,58 @@ npm start
 
 Then open http://localhost:3000. Click the game to capture the mouse.
 
+## Multiplayer
+
+Everyone who drops into the hotzone at the same time shares it (up to 8 per session). It is PvPvE: other operators can shoot you, and they can loot your body.
+
+- **Published link:** multiplayer runs on the claude.ai artifact's live room, so there is no server to host.
+- **Self-hosted:** `npm start` also runs a WebSocket relay at `/ws`, which the client uses automatically.
+- **Who simulates the enemies:** the first player in a session acts as host and simulates all hostiles. Everyone else sees synced copies. If the host leaves, another player takes over.
+- **What is shared:** loot, dropped gear, vehicles, grenades and the extraction helicopter.
+
+Set your callsign on the main menu.
+
 ## The loop
 
 1. **Haven (base).** Press `Tab` to pack your backpack from the stash and equip weapons, armor and a pack.
    Press `B` to build. Use your benches (`E`) to craft.
-2. **Deploy.** Use the *Drop Pod Console* in the hangar and pick an insertion point. Each one shows its
-   threat level. The pod re-enters, brakes and lands.
+2. **Deploy.** Use the *Flight Ops Console* (or walk up to the helicopter on the pad) and pick an
+   insertion point. A utility helicopter flies you in from the map edge, flares into a hover, and you
+   fast-rope down. Press Space to skip the flight.
 3. **Scavenge.** Hold `E` to search crates, lockers, safes, weapon cases and car trunks. Salvage heaps,
    junction boxes, chemical drums, timber and tarps give you building resources.
 4. **Survive.** Gnat drones, Skitter crawlers, Sentinel turrets, raider squads and a Juggernaut Strider
    (weak point: the glowing core on its back) all hunt by sight and sound. A suppressor helps.
-5. **Extract.** Two of the four LZs are active each raid (◆ on the compass, `M` for the map). Call the lift
-   at the console, hold the pad for 50 seconds, then get aboard.
+5. **Extract.** Two of the four LZs are active each raid (◆ on the compass, `M` for the map). Call the
+   helicopter at the console and hold the pad while it flies in. It lands and waits 40 seconds for you to board.
+
+## Carry weight
+
+Every item has a real weight in kg: weapons and their attachments, loaded magazines, ammo by the round,
+armour, plates, meds and every resource. Your total sets your encumbrance band (Light to Overloaded).
+Heavier loads slow you down, drain stamina faster, lower your jump, make your sights sway more, and
+make your footsteps louder. Above 48 kg you can't sprint.
+
+## Adaptive enemy AI
+
+A director learns how you play and saves it across raids: engagement range, aggression, crouching,
+shooting from one spot, headshot rate, suppressor use, vehicle use, favourite drop zones and LZs, and
+the side you get flanked from. The hostiles adapt to it:
+
+- **Raider squads:** each member has a role (leader, support, flanker, assault). They find real cover by sampling sightlines, peek and shoot, lay suppressing fire on your last known position, flank, retreat and patch up, push when you reload, throw frags to flush you out and smoke to cross open ground.
+- **Counter-tactics:** against long-range players they close in by bounding between cover. Against rushers they hold angles and carry more shotguns.
+- **Gear and hearing:** if you land a lot of headshots, more raiders wear helmets. If you use suppressors, they investigate bullet impacts.
+- **Ambushes:** your favourite LZ gets staked out.
+- **Machines:** they swarm on alerts, crawlers surround you (or kite you if you rush), and drones circle behind snipers.
+
+The **Threat Intel** terminal at Haven shows what they have learned.
+
+## Vehicles
+
+There are four military vehicles in the hotzone: the M1151 HMMWV, an MRAP 4×4, an M35 cargo truck and a military UTV.
+They use the Odyssey Rush driving model, with the same controls (W/S, A/D, Space handbrake, V camera,
+E enter/exit, R flip). Passengers can shoot. Armour soaks up incoming fire, vehicles take crash
+damage and explode, and you can run hostiles down.
 
 ## Base building
 
@@ -46,10 +86,16 @@ Demolish with `F` for a 50% refund.
 
 ## Weapons and attachments
 
-There are six weapons: P9 pistol, VX-9 SMG, Breacher 12 pump shotgun, K-15 carbine, B-308 battle rifle
-and M14R marksman rifle. Each one is modelled part by part (receivers, rails, M-LOK slots, bolt
-catches, ejection ports, charging handles, magazines) with PBR steel, anodised aluminium, polymer,
-cerakote and wood materials.
+There are 15 real-world firearms: Glock 17, Colt M1911A1, Desert Eagle Mk XIX, SIG MPX, H&K MP5A3,
+H&K UMP45, Colt M4A1, AKM, AK-74M, H&K HK417, FN M249 SAW, M14 EBR, SVD Dragunov, Remington M24 SWS
+and Remington 870. Each is built part by part with real proportions and real calibers (9×19, .45 ACP,
+.50 AE, 5.56, 5.45, 7.62×39, 7.62×51, 7.62×54R, 12 ga).
+
+Every weapon has full animations, in first and third person:
+
+- **Reloads:** box-mag reloads that tilt the gun, drop the mag and seat a new one from the pouch. AK reloads rock the new mag in and rack the side charging handle overhand. H&K reloads lock the cocking lever back and finish with the slap. Pistols drop the mag and release the slide. On the M249 you open the feed cover, swap the pouch, lay the belt and close the cover.
+- **Action cycling:** shell-by-shell tube loading and pump racking, bolt-action cycling after every shot, slide and bolt blowback, and slide lock on empty.
+- **Handling:** draw and holster, and an inspect animation (`I`).
 
 | Slot | Options |
 | --- | --- |
@@ -76,6 +122,9 @@ shows up on the model.
 | Tab / M | Inventory / map |
 | V | Toggle first / third person |
 | L | Weapon light |
+| I | Inspect weapon |
+| Shift while aiming | Hold breath (magnified optics) |
+| E near a vehicle | Drive or ride |
 | B | Build mode (Haven) |
 | Esc | Pause and settings |
 
@@ -85,7 +134,10 @@ There are no external assets. All textures (concrete, brick, rust, corrugated st
 steel, polymer stippling, camo and more) are generated as tileable PBR albedo, normal and roughness
 maps at load time. Audio is synthesised with WebAudio. The terrain uses a height-blended 4-layer
 splat shader. Lighting is a physical sky with image-based lighting, soft shadows, bloom, ACES tone
-mapping and colour grading. Characters are faceted low-poly with fabric and camo textures, and they
+mapping and colour grading, ground-truth ambient occlusion (GTAO), height fog and a procedural cloud
+layer. Characters are faceted low-poly with fabric and camo textures, and they
 use two-bone arm IK on the weapon.
 
-Progress is saved in `localStorage`.
+Progress and the AI's profile of you are saved in `localStorage`.
+
+`node tools/build-artifact.mjs <dir>` builds the client as a claude.ai artifact (three.js from jsDelivr).

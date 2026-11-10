@@ -6,6 +6,13 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+
+// Height fog: thicker in the valleys, thinning with altitude, so distant terrain sits in a believable haze layer.
+THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\n varying float vFogDepth; varying float vFogY;\n#endif';
+THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\n vFogDepth = - mvPosition.z; vFogY = cameraPosition.y + (transpose(mat3(viewMatrix)) * mvPosition.xyz).y;\n#endif';
+THREE.ShaderChunk.fog_pars_fragment = '#ifdef USE_FOG\n uniform vec3 fogColor; varying float vFogDepth; varying float vFogY;\n #ifdef FOG_EXP2\n uniform float fogDensity;\n #else\n uniform float fogNear; uniform float fogFar;\n #endif\n#endif';
+THREE.ShaderChunk.fog_fragment = '#ifdef USE_FOG\n #ifdef FOG_EXP2\n float hAtt = mix(1.0, 0.35, smoothstep(10.0, 90.0, vFogY));\n float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth * hAtt );\n #else\n float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );\n #endif\n gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );\n#endif';
 import { setAniso } from './textures.js';
 
 const GradeShader = {
@@ -80,16 +87,18 @@ export class Engine {
     this.renderPass = new RenderPass(this.scene, this.camera);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.22, 0.35, 1.6);
     this.grade = new ShaderPass(GradeShader);
-    this.composer.addPass(this.renderPass); this.composer.addPass(this.bloom); this.composer.addPass(new OutputPass()); this.composer.addPass(this.grade);
+    this.gtao = new GTAOPass(this.scene, this.camera, innerWidth, innerHeight);
+    this.gtao.blendIntensity = 0.85; this.gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.4, thickness: 1.2, scale: 1.1, samples: 12 }); this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+    this.composer.addPass(this.renderPass); this.composer.addPass(this.gtao); this.composer.addPass(this.bloom); this.composer.addPass(new OutputPass()); this.composer.addPass(this.grade);
     addEventListener('resize', () => this.resize());
     this.quality = 'high';
   }
   setQuality(q) {
     this.quality = q; const r = this.renderer;
-    r.setPixelRatio(q === 'low' ? Math.min(devicePixelRatio, 0.85) : Math.min(devicePixelRatio, 1.5));
-    this.sunLight.shadow.mapSize.set(q === 'low' ? 2048 : 4096, q === 'low' ? 2048 : 4096);
+    r.setPixelRatio(q === 'low' ? Math.min(devicePixelRatio, 0.85) : q === 'ultra' ? Math.min(devicePixelRatio, 2) : Math.min(devicePixelRatio, 1.5));
+    this.sunLight.shadow.mapSize.set(q === 'low' ? 2048 : 4096, q === 'low' ? 2048 : 4096); this.sunLight.shadow.radius = q === 'low' ? 1 : 2;
     if (this.sunLight.shadow.map) { this.sunLight.shadow.map.dispose(); this.sunLight.shadow.map = null; }
-    this.bloom.enabled = q !== 'low';
+    this.bloom.enabled = q !== 'low'; this.gtao.enabled = q === 'ultra' || q === 'high';
     for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) { rt.samples = q === 'low' ? 0 : 4; rt.dispose(); }
     this.resize();
   }

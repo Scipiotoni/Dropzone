@@ -167,3 +167,18 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 .result { text-align: center; padding: 10px 0 0; } .result h1 { font-size: 64px; margin: 0; letter-spacing: 0.2em; }
 .result h1.ok { color: var(--green); } .result h1.ko { color: var(--red); }
 @media (max-width: 800px) { .win .body { flex-direction: column; } #vitals { width: 200px; } .mm { width: 86vw; } .mm .logo { font-size: 56px; } }
+
+#vehhud { position: absolute; right: 24px; bottom: 24px; width: 260px; text-align: right; text-shadow: 0 1px 3px #000; }
+#vehhud .vname { font: 700 15px var(--font); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+#vehhud .spd { font: 48px var(--mono); line-height: 1; } #vehhud .spd small { font-size: 16px; color: var(--dim); margin-left: 4px; }
+#vehhud .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; font: 700 12px var(--font); } #vehhud .row label { width: 36px; color: var(--dim); }
+#vehhud .vk { margin-top: 6px; font-size: 12px; color: var(--dim); }
+#online { position: fixed; right: 16px; top: 12px; z-index: 5; font: 600 13px var(--font); color: var(--txt); background: var(--bg); padding: 5px 10px; border: 1px solid var(--line); pointer-events: none; text-align: right; }
+#online i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 6px; box-shadow: 0 0 6px var(--green); } #online i.off { background: #777; box-shadow: none; }
+#online .who { display: none; } #online:hover .who { display: block; }
+#panel:not(.hidden) ~ #online .who, #menu:not(.hidden) ~ #online .who { display: block; margin-top: 4px; font-weight: 500; }
+.callsign { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; margin-bottom: 8px; }
+.callsign label { font-size: 13px; letter-spacing: 0.12em; color: var(--dim); text-transform: uppercase; }
+.callsign input { background: #111; color: var(--txt); border: 1px solid var(--line2); padding: 8px 10px; font: 600 16px var(--font); }
+.callsign small { grid-column: 2; color: var(--dim); }
+#feed { top: 60px; }

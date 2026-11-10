@@ -46,15 +46,18 @@ export function buildBase(scene) {
   S.part(boxGeo(12.4, 3, 0.3), M.yellow, 0, 9.6, -D / 2 - 0.2); // door header w/ hazard
   for (let i = 0; i < 4; i++) S.part(boxGeo(L - 2, 0.4, 0.3), M.steel, 0, Hh - 0.6, -D / 2 + 3 + i * 5); // roof trusses
   for (let i = 0; i < 4; i++) { S.part(boxGeo(1.6, 0.1, 0.5), M.steel, -6 + i * 4, Hh - 0.8, 0); S.part(boxGeo(1.5, 0.04, 0.4), M.emWarm, -6 + i * 4, Hh - 0.86, 0); }
-  // launch rails + drop pod
-  S.part(boxGeo(6, 0.3, 6), M.plate, 0, 0.15, 2);
-  for (const sx of [-1, 1]) S.box(0.5, 8, 0.5, M.yellow, sx * 3.2, 0.15, 2, 0, { m: 'metal' });
-  S.part(boxGeo(7, 0.5, 0.6), M.yellow, 0, 8.2, 2);
-  const pod = makePod(); pod.position.copy(S.world(0, 0.45, 2)); root.add(pod); W.pod = pod;
-  W.col.box(pod.position.x, pod.position.z, 2.6, 2.6, 0, 4.2, 0, 'metal');
+  // vehicle bay / armoury racks in the hangar
+  S.part(boxGeo(8, 0.04, 10), M.plate, 0, 0.17, 2);
+  for (let i = 0; i < 4; i++) { S.box(0.8, 2.0, 0.5, M.green, -12 + i * 1, 0.15, -4, 0, { m: 'metal' }); }
+  // helipad outside the hangar
+  const hp = new P.Site(W, 24, 0, -24, 0); hp.box(16, 0.2, 16, M.concrete, 0, -0.05, 0, 0, { ts: 4 });
+  hp.part(boxGeo(8, 0.02, 0.6), M.yellow, 0, 0.16, 0); for (const sx of [-1, 1]) hp.part(boxGeo(0.6, 0.02, 6), M.yellow, sx * 2.5, 0.16, 0);
+  for (const [cx, cz] of [[-7.5, -7.5], [7.5, -7.5], [7.5, 7.5], [-7.5, 7.5]]) hp.part(new THREE.SphereGeometry(0.12, 8, 6), M.emOrange, cx, 0.3, cz);
+  W.col.box(24, -24, 2.4, 5, 0, 3, -2.4, 'metal');
   // consoles
   const cons = (lx, lz, ry, kind, label) => { S.box(1.2, 1.1, 0.7, M.machineDark, lx, 0.15, lz, ry, { m: 'metal' }); S.part(boxGeo(1.0, 0.6, 0.05), M.emCyan, lx - Math.sin(ry) * 0.36, 1.35, lz - Math.cos(ry) * 0.36, -0.4, ry, 0); W.interact.push({ kind, label, pos: S.world(lx, 1.0, lz) }); };
-  cons(5.5, 4, 0, 'launch', 'Drop Pod Console');
+  cons(5.5, 4, 0, 'launch', 'Flight Ops Console');
+  cons(9, 7, 0, 'intel', 'Threat Intel Terminal');
   cons(-9, 7, 0, 'stash', 'Stash Terminal');
   // shelves of gear inside hangar
   for (let i = 0; i < 3; i++) { S.box(3, 2.2, 0.8, M.steel, -10 + i * 3.4, 0.15, D / 2 - 1, 0, { m: 'metal' }); for (let j = 0; j < 3; j++) S.part(boxGeo(0.8, 0.4, 0.5), M.green, -10.8 + i * 3.4 + j * 0.9, 0.95 + (j % 2) * 0.7, D / 2 - 1); }
@@ -78,7 +81,7 @@ export function buildBase(scene) {
   return W;
 }
 
-export function makePod() {
+export function makePodUnused() {
   const M = P.worldMats(); const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.4, 3.2, 10), M.white); body.position.y = 1.9; g.add(body);
   const nose = new THREE.Mesh(new THREE.ConeGeometry(1.1, 1.3, 10), M.white); nose.position.y = 4.15; g.add(nose);

@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 import { fileURLToPath } from 'url';
+import { WebSocketServer } from 'ws';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -48,4 +49,28 @@ const server = http.createServer((req, res) => {
     res.end(gz ? e.gz : e.raw);
   });
 });
+// ---- multiplayer relay: rooms of peers, each with a presence object, broadcast to the room at 20 Hz
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
+const rooms = new Map(); let nextPeer = 1;
+wss.on('connection', (ws) => {
+  ws.peer = 'p' + (nextPeer++).toString(36) + Math.random().toString(36).slice(2, 6); ws.rooms = new Map();
+  ws.send(JSON.stringify({ t: 'hello', peer: ws.peer }));
+  ws.on('message', (buf) => {
+    let m; try { m = JSON.parse(buf); } catch (e) { return; }
+    if (typeof m.room !== 'string' || m.room.length > 40) return;
+    if (m.t === 'join') { if (!rooms.has(m.room)) rooms.set(m.room, new Set()); rooms.get(m.room).add(ws); ws.rooms.set(m.room, {}); rooms.get(m.room).dirty = true; }
+    else if (m.t === 'leave') { rooms.get(m.room)?.delete(ws); ws.rooms.delete(m.room); if (rooms.get(m.room)) rooms.get(m.room).dirty = true; }
+    else if (m.t === 'presence' && ws.rooms.has(m.room) && m.p && typeof m.p === 'object') { if (buf.length > 8192) return; ws.rooms.set(m.room, m.p); rooms.get(m.room).dirty = true; }
+  });
+  ws.on('close', () => { for (const r of ws.rooms.keys()) { rooms.get(r)?.delete(ws); if (rooms.get(r)) rooms.get(r).dirty = true; } });
+});
+setInterval(() => {
+  for (const [name, set] of rooms) {
+    if (!set.size) { rooms.delete(name); continue; }
+    if (!set.dirty) continue; set.dirty = false;
+    const msg = JSON.stringify({ t: 'peers', room: name, peers: [...set].map((w) => ({ peer: w.peer, presence: w.rooms.get(name) })) });
+    for (const w of set) if (w.readyState === 1) w.send(msg);
+  }
+}, 50);
+
 server.listen(PORT, () => console.log(`Dropzone running on http://localhost:${PORT}`));

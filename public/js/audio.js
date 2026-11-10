@@ -76,6 +76,11 @@ export class Audio {
     else if (kind === 'servo') { const o = C.createOscillator(); o.type = 'square'; o.frequency.value = 55; const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 300; o.connect(lp).connect(out); o.start(); nodes.push(o); }
     else if (kind === 'engine') { const n = C.createBufferSource(); n.buffer = this.noise; n.loop = true; const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 260; n.connect(lp).connect(out); n.start(); nodes.push(n); const o = C.createOscillator(); o.frequency.value = 42; o.type = 'sawtooth'; const g = C.createGain(); g.gain.value = 0.3; o.connect(g).connect(out); o.start(); nodes.push(o); }
     else if (kind === 'alarm') { const o = C.createOscillator(); o.type = 'square'; const lfo = C.createOscillator(); lfo.frequency.value = 1.6; const lg = C.createGain(); lg.gain.value = 220; lfo.connect(lg).connect(o.frequency); o.frequency.value = 660; const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1400; o.connect(lp).connect(out); o.start(); lfo.start(); nodes.push(o, lfo); }
+    else if (kind === 'heli') { // turbine whine + rotor blade slap (amplitude-modulated low noise)
+      const n = C.createBufferSource(); n.buffer = this.noise; n.loop = true; const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 380; const am = C.createGain(); am.gain.value = 0.5;
+      const lfo = C.createOscillator(); lfo.frequency.value = 17; const lg = C.createGain(); lg.gain.value = 0.5; lfo.connect(lg).connect(am.gain); n.connect(lp).connect(am).connect(out); n.start(); lfo.start(); nodes.push(n, lfo);
+      const o = C.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 1900; const hp = C.createBiquadFilter(); hp.type = 'bandpass'; hp.frequency.value = 2200; hp.Q.value = 6; const og = C.createGain(); og.gain.value = 0.05; o.connect(hp).connect(og).connect(out); o.start(); nodes.push(o);
+    }
     else if (kind === 'fire') { const n = C.createBufferSource(); n.buffer = this.noise; n.loop = true; const bp = C.createBiquadFilter(); bp.type = 'lowpass'; bp.frequency.value = 700; n.connect(bp).connect(out); n.start(); nodes.push(n); }
     const self = this;
     return {
