@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dropzone</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <script type="importmap">
+    { "imports": { "three": "/lib/three/three.module.js", "three/addons/": "/lib/three/addons/" } }
+  </script>
+</head>
+<body>
+  <div id="game"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><b></b></div>
+    <div id="hitmarker"></div>
+    <div id="scope" class="hidden"><div class="ring"></div><div class="reticle"></div></div>
+    <div id="hurt"></div>
+    <div id="hurtdir"></div>
+    <div id="compass"><div id="compassStrip"></div><div class="tick"></div></div>
+    <div id="raidinfo"><span id="zone"></span><span id="timer"></span></div>
+    <div id="objective"></div>
+    <div id="toasts"></div>
+    <div id="feed"></div>
+    <div id="prompt" class="hidden"><div class="key">E</div><span></span><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" /></svg></div>
+    <div id="vitals">
+      <div class="row"><label>HP</label><div class="bar"><i id="hpbar" class="hp"></i></div><b id="hpval">100</b></div>
+      <div class="row"><label>AR</label><div class="bar"><i id="arbar" class="ar"></i></div><b id="arval">0</b></div>
+      <div class="row thin"><label>ST</label><div class="bar"><i id="stbar" class="st"></i></div></div>
+      <div id="heal" class="hidden"><div class="bar"><i id="healbar"></i></div><span id="healtxt"></span></div>
+    </div>
+    <div id="weaponhud">
+      <div id="wname"></div>
+      <div id="ammo"><b id="mag">0</b><span>/</span><span id="reserve">0</span></div>
+      <div id="wslots"></div>
+      <div id="packcap"></div>
+    </div>
+    <div id="buildbar" class="hidden"></div>
+    <div id="hint"></div>
+  </div>
+
+  <!-- full screen panels -->
+  <div id="panel" class="hidden"></div>
+  <div id="menu" class="hidden"></div>
+  <div id="fade"></div>
+  <div id="loading"><div class="logo">DROP<span>ZONE</span></div><div id="loadtxt">Loading…</div><div class="lbar"><i id="loadbar"></i></div></div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

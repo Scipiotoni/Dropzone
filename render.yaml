@@ -1,0 +1,12 @@
+# Render Blueprint: Dropzone is a static single-player game served by a tiny Node server.
+services:
+  - type: web
+    name: dropzone
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"

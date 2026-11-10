@@ -1,0 +1,16 @@
+{
+  "name": "dropzone",
+  "version": "0.1.0",
+  "description": "Extraction shooter: drop into the hotzone, scavenge resources, fight machines and raiders, extract and build up your base.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "dependencies": {
+    "three": "0.170.0"
+  }
+}
