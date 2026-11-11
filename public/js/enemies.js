@@ -1,7 +1,6 @@
 // Hostiles: machine drones, crawlers, the giant Strider walker, sentinel turrets, and human raiders.
 // Shared perception (sight + hearing), hitscan combat with weak points, loot drops on death.
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { worldMats } from './props.js';
 import { Operator } from './character.js';
 import { buildGun } from './guns.js';
@@ -9,25 +8,14 @@ import { audio } from './audio.js';
 import { WeaponAnimator } from './anim.js';
 import { WEAPONS } from './items.js';
 import { gunSound } from './player.js';
+import { buildDrone, buildCrawler, buildStrider, buildSentinel, buildTick, mmats, makeShieldBubble } from './machines.js';
 
 const V = () => new THREE.Vector3();
 const _a = V(), _b = V(), _c = V(), _d = V();
-let EM = null;
-function emats() {
-  if (EM) return EM; const M = worldMats();
-  EM = { hull: M.machine, dark: M.machineDark, steel: M.steel, rubber: M.rubber, eye: new THREE.MeshBasicMaterial({ color: 0xff2a10, toneMapped: false }), eyeAlert: new THREE.MeshBasicMaterial({ color: 0xffd020, toneMapped: false }),
-    core: new THREE.MeshBasicMaterial({ color: 0x40e0ff, toneMapped: false }), rotor: new THREE.MeshBasicMaterial({ color: 0x202020, transparent: true, opacity: 0.35, depthWrite: false }), orange: M.orange,
-    beam: new THREE.MeshBasicMaterial({ color: 0xff2010, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }) };
-  return EM;
-}
-const rbox = (w, h, d, r = 0.04) => new RoundedBoxGeometry(w, h, d, 2, r);
-function mk(geo, mat, parent, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); m.castShadow = true; m.receiveShadow = true; parent.add(m); return m; }
-const cylZ = (r, len, seg = 12) => new THREE.CylinderGeometry(r, r, len, seg).rotateX(Math.PI / 2);
-
 let NEXT_ID = 1;
 export function resetEnemyIds(n = 1) { NEXT_ID = n; }
-const TYPE_CODE = { drone: 0, crawler: 1, strider: 2, sentinel: 3, raider: 4 };
-export const TYPE_BY_CODE = ['drone', 'crawler', 'strider', 'sentinel', 'raider'];
+const TYPE_CODE = { drone: 0, crawler: 1, strider: 2, sentinel: 3, raider: 4, tick: 5 };
+export const TYPE_BY_CODE = ['drone', 'crawler', 'strider', 'sentinel', 'raider', 'tick'];
 class Enemy {
   constructor(game, pos, cfg) {
     this.game = game; this.pos = pos.clone(); this.home = pos.clone(); this.vel = V(); this.yaw = Math.random() * 6.28; this.alive = true; this.hp = this.maxHp = cfg.hp;
@@ -63,12 +51,16 @@ class Enemy {
   }
   damage(n, hit, from, byMe = false, byPeer = null) {
     if (!this.alive) return;
-    if (this.puppet) { if (byMe) this.game.net?.event('eh', [this.id, Math.round(n), hit?.tag || '']); this.flashT = 0.08; this.hitFx(hit); return; }
+    if (this.puppet) { if (byMe) this.game.net?.event('eh', [this.id, Math.round(n), hit?.tag || '']); this.flashT = 0.08; this.hitFx(hit); if (this.shield > 0) this.bubble?.userData.flash(0.8); return; }
     if (byMe) this.lastHitBy = 'me'; else if (byPeer) this.lastHitBy = byPeer;
+    if (this.shield > 0) { // energy shield soaks damage first (raiders)
+      const a = Math.min(this.shield, n); this.shield -= a; n -= a; this.shieldT = 0; this.bubble?.userData.flash(0.9);
+      if (this.shield <= 0) { this.shield = 0; this.bubble?.userData.flash(1.6, 0xb0e8ff); this.game.fx.impact(this.pos.clone().setY(this.pos.y + 1.2), null, 'shieldbreak'); if (this.pos.distanceTo(this.game.player.pos) < 60) audio.click(200, 0.12, 0.3, 'sawtooth'); }
+    }
     this.hp -= n; this.alert = 1; this.state = 'attack'; this.lastSeen = (from || this.player.pos).clone(); this.flashT = 0.08; this.hitFx(hit); this.onHurt?.(n, from);
     if (this.hp <= 0) { this.hp = 0; this.die(); this.game.net?.event('ek', [this.id, this.lastHitBy === 'me' ? this.game.net.me : this.lastHitBy || '']); if (this.lastHitBy === 'me') this.game.onKill(this); }
   }
-  hitFx(hit) { this.game.fx.impact(hit?.point || this.pos.clone().setY(this.pos.y + 1), null, this.type === 'raider' ? 'flesh' : 'machine'); }
+  hitFx(hit) { this.game.fx.impact(hit?.point || this.pos.clone().setY(this.pos.y + 1), null, this.shield > 0 ? 'shield' : this.type === 'raider' ? 'flesh' : 'machine'); }
   tickEngage(dt, see) { this.engageT = see ? (this.engageT || 0) + dt : Math.max(0, (this.engageT || 0) - dt * 2); }
   turnTo(target, dt, rate = 4) { const want = Math.atan2(-(target.x - this.pos.x), -(target.z - this.pos.z)); let dy = want - this.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); this.yaw += THREE.MathUtils.clamp(dy, -rate * dt, rate * dt); return Math.abs(dy); }
   // hitscan at the current target with distance-based spread; first shots of an engagement go wide
@@ -93,8 +85,8 @@ class Enemy {
   remove() { this.game.scene.remove(this.root); this.hum?.stop(); this.hum = null; if (this.col) this.game.world.col.remove(this.col); }
   eyePos(out) { return out.copy(this.pos).setY(this.pos.y + 1.5); }
   // ---- networking: compact state for host snapshots / puppets on clients
-  netState() { return [this.id, TYPE_CODE[this.type], Math.round(this.pos.x * 10), Math.round(this.pos.y * 10), Math.round(this.pos.z * 10), Math.round(this.yaw * 100), Math.round(this.hp / this.maxHp * 100), (this.alive ? 1 : 0) | (this.state === 'attack' ? 2 : 0) | (this.crouch ? 4 : 0) | (this.reloading ? 8 : 0), Math.round((this.pitch || 0) * 100), this.tier || 0]; }
-  applyNet(a) { this.netPos.set(a[2] / 10, a[3] / 10, a[4] / 10); this.netYaw = a[5] / 100; this.hp = a[6] / 100 * this.maxHp; this.netFlags = a[7]; this.netPitch = a[8] / 100; this.state = a[7] & 2 ? 'attack' : 'idle'; this.lastNet = performance.now(); if (!(a[7] & 1) && this.alive) { this.alive = false; this.die(true); } }
+  netState() { return [this.id, TYPE_CODE[this.type], Math.round(this.pos.x * 10), Math.round(this.pos.y * 10), Math.round(this.pos.z * 10), Math.round(this.yaw * 100), Math.round(this.hp / this.maxHp * 100), (this.alive ? 1 : 0) | (this.state === 'attack' ? 2 : 0) | (this.crouch ? 4 : 0) | (this.reloading ? 8 : 0), Math.round((this.pitch || 0) * 100), this.tier || 0, this.maxShield ? Math.round(this.shield / this.maxShield * 100) : 0]; }
+  applyNet(a) { this.netPos.set(a[2] / 10, a[3] / 10, a[4] / 10); this.netYaw = a[5] / 100; this.hp = a[6] / 100 * this.maxHp; this.netFlags = a[7]; this.netPitch = a[8] / 100; if (this.maxShield && a[10] !== undefined) this.shield = a[10] / 100 * this.maxShield; this.state = a[7] & 2 ? 'attack' : 'idle'; this.lastNet = performance.now(); if (!(a[7] & 1) && this.alive) { this.alive = false; this.die(true); } }
   puppetBase(dt) { const k = Math.min(1, dt * 10); const before = _d.copy(this.pos); this.pos.lerp(this.netPos, k); let dy = this.netYaw - this.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); this.yaw += dy * k; return before.distanceTo(this.pos); }
 }
 const KIND = ['pistol', 'smg', 'rifle', 'heavy', 'shotgun', 'drone', 'cannon', 'laser'];
@@ -103,30 +95,15 @@ export const SHOT_KINDS = KIND;
 // ------------------------------------------------------------------ Gnat drone
 export class Drone extends Enemy {
   constructor(game, pos) {
-    super(game, pos, { hp: 70 }); this.type = 'drone'; this.name = 'Gnat Drone';
-    const E = emats(), R = this.root; this.body = new THREE.Group(); R.add(this.body);
-    mk(rbox(0.55, 0.22, 0.7, 0.07), E.hull, this.body);
-    mk(rbox(0.4, 0.1, 0.5, 0.04), E.dark, this.body, 0, 0.14, 0.03);
-    mk(rbox(0.22, 0.16, 0.18, 0.04), E.dark, this.body, 0, -0.12, -0.3);       // sensor housing
-    this.eye = mk(new THREE.SphereGeometry(0.055, 12, 8), E.eye, this.body, 0, -0.12, -0.39);
-    mk(cylZ(0.025, 0.3), E.steel, this.body, 0.08, -0.2, -0.3); mk(cylZ(0.025, 0.3), E.steel, this.body, -0.08, -0.2, -0.3); // twin barrels
-    this.muzzle = new THREE.Object3D(); this.muzzle.position.set(0, -0.2, -0.47); this.body.add(this.muzzle);
-    mk(new THREE.CylinderGeometry(0.008, 0.008, 0.4, 4), E.steel, this.body, 0.15, 0.3, 0.2);
-    this.rotors = [];
-    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-      const arm = mk(rbox(0.5, 0.05, 0.07, 0.02), E.dark, this.body, sx * 0.4, 0.02, sz * 0.36, 0, sx * sz * 0.7, 0);
-      mk(new THREE.CylinderGeometry(0.07, 0.08, 0.12, 12), E.hull, this.body, sx * 0.6, 0.06, sz * 0.52);
-      const rot = new THREE.Group(); rot.position.set(sx * 0.6, 0.14, sz * 0.52); this.body.add(rot);
-      mk(new THREE.CylinderGeometry(0.3, 0.3, 0.005, 24), E.rotor, rot); mk(rbox(0.6, 0.008, 0.05, 0.004), E.dark, rot);
-      mk(new THREE.TorusGeometry(0.31, 0.012, 4, 24).rotateX(Math.PI / 2), E.dark, this.body, sx * 0.6, 0.14, sz * 0.52);
-      this.rotors.push(rot);
-    }
+    super(game, pos, { hp: 70 }); this.type = 'drone'; this.name = 'Gnat Hunter Drone';
+    const m = buildDrone(); this.root.add(m.root); Object.assign(this, { body: m.body, eye: m.eye, eyeHalo: m.eyeHalo, rotors: m.rotors, muzzle: m.muzzle, gunG: m.gun, blink: m.blink, thrusters: m.thrusters, beam: m.beam });
     this.hitboxes = [{ obj: this.body, r: 0.45, mult: 1, tag: 'body' }, { obj: this.eye, r: 0.12, mult: 2.2, tag: 'eye' }];
     this.alt = 5 + Math.random() * 4; this.pos.y = game.world.terrain.height(pos.x, pos.z) + this.alt;
     this.hum = audio.loop('drone');
   }
   eyePos(out) { return this.eye.getWorldPosition(out); }
-  puppetUpdate(dt, t) { if (!this.alive) return this.update(dt, t); this.puppetBase(dt); this.root.position.copy(this.pos); this.body.rotation.set(0, this.yaw, 0, 'YXZ'); for (const r of this.rotors) r.rotation.y += dt * 60; this.eye.material = this.netFlags & 2 ? emats().eye : emats().eyeAlert; this.hum?.set(this.pos, 0.18); }
+  puppetUpdate(dt, t) { if (!this.alive) return this.update(dt, t); this.puppetBase(dt); this.root.position.copy(this.pos); this.body.rotation.set(0, this.yaw, 0, 'YXZ'); for (const r of this.rotors) r.rotation.y += dt * 60; this.glowState(this.netFlags & 2 ? 1 : 0, t); this.hum?.set(this.pos, 0.18); }
+  glowState(alert, t) { const M = mmats(); const a = alert > 0.5; this.eye.material = a ? M.eye : M.eyeCalm; this.eyeHalo.material = a ? M.halo : M.haloCalm; this.eyeHalo.scale.setScalar((a ? 0.75 : 0.5) * (1 + Math.sin(t * (a ? 14 : 3)) * 0.12)); const on = Math.sin(t * 6 + this.id) > 0.6; for (const b of this.blink) b.visible = on; }
   update(dt, t) {
     if (!this.alive) { this.vel.y -= 14 * dt; this.pos.addScaledVector(this.vel, dt); this.body.rotation.x += dt * 4; this.body.rotation.z += dt * 3; const gy = this.game.world.terrain.height(this.pos.x, this.pos.z); if (this.pos.y < gy + 0.2) { if (!this.crashed) { this.crashed = true; this.game.fx.explosion(this.pos, 0.5); audio.explosion(this.pos, 0.5); this.dropLoot('m_drone'); } this.pos.y = gy + 0.2; this.vel.set(0, 0, 0); } this.root.position.copy(this.pos); return; }
     const P = this.player; const see = this.canSee(70); this.tickEngage(dt, see);
@@ -154,7 +131,11 @@ export class Drone extends Enemy {
     const [rx, rz] = this.game.world.col.resolve(this.pos.x, this.pos.z, 0.8, this.pos.y - 0.5, 1.0, 0); this.pos.x = rx; this.pos.z = rz;
     this.root.position.copy(this.pos); this.body.rotation.set(-this.vel.z * 0.03 * Math.cos(this.yaw) + this.vel.x * 0.03 * Math.sin(this.yaw), this.yaw, 0, 'YXZ');
     for (const r of this.rotors) r.rotation.y += dt * 60;
-    this.eye.material = this.alert > 0.5 ? emats().eye : emats().eyeAlert;
+    this.glowState(this.alert, t);
+    // the gun tracks the target: pitch toward it, telegraph a red targeting laser before each burst
+    if (this.state === 'attack' && this.lastSeen) { const dy = this.lastSeen.y + 1.2 - this.pos.y; const dh = Math.hypot(this.lastSeen.x - this.pos.x, this.lastSeen.z - this.pos.z); this.gunG.rotation.x += (Math.atan2(dy, dh) - this.gunG.rotation.x) * Math.min(1, dt * 6); this.beam.scale.z = Math.hypot(dy, dh); }
+    this.beam.visible = this.state === 'attack' && see && (this.burst > 0 || this.fireCD < 0.7);
+    this.beam.material.opacity = 0.3 + Math.random() * 0.3;
     this.hum?.set(this.pos, 0.18);
   }
   die() { this.alive = false; this.vel.set((Math.random() - 0.5) * 3, 2, (Math.random() - 0.5) * 3); this.hum?.stop(); this.hum = null; }
@@ -164,33 +145,16 @@ export class Drone extends Enemy {
 export class Crawler extends Enemy {
   constructor(game, pos) {
     super(game, pos, { hp: 160 }); this.type = 'crawler'; this.name = 'Skitter';
-    const E = emats(), R = this.root; this.body = new THREE.Group(); this.body.position.y = 0.75; R.add(this.body);
-    mk(rbox(0.8, 0.35, 1.1, 0.1), E.hull, this.body);
-    mk(rbox(0.6, 0.15, 0.8, 0.05), E.dark, this.body, 0, 0.22, 0.05);
-    for (const sx of [-1, 1]) mk(rbox(0.06, 0.2, 0.7, 0.02), E.orange, this.body, sx * 0.41, 0, 0);
-    this.head = new THREE.Group(); this.head.position.set(0, 0.12, -0.6); this.body.add(this.head);
-    mk(rbox(0.38, 0.24, 0.32, 0.06), E.dark, this.head);
-    this.eye = mk(new THREE.SphereGeometry(0.06, 12, 8), E.eye, this.head, 0, 0.03, -0.17);
-    for (const sx of [-1, 1]) mk(cylZ(0.03, 0.4), E.steel, this.head, sx * 0.12, -0.06, -0.25);
-    this.muzzle = new THREE.Object3D(); this.muzzle.position.set(0, -0.06, -0.47); this.head.add(this.muzzle);
-    this.core = mk(new THREE.SphereGeometry(0.12, 12, 8), E.core, this.body, 0, 0.15, 0.5);
-    this.legs = [];
-    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      const hip = new THREE.Group(); hip.position.set(sx * 0.42, 0, sz * 0.4); this.body.add(hip);
-      mk(new THREE.SphereGeometry(0.1, 10, 8), E.dark, hip);
-      const up = new THREE.Group(); hip.add(up); mk(rbox(0.1, 0.1, 0.6, 0.03).translate(0, 0, -0.3), E.hull, up); up.rotation.set(0, sx * Math.PI / 2 - sx * sz * 0.5, 0);
-      const kn = new THREE.Group(); kn.position.z = -0.6; up.add(kn); mk(new THREE.SphereGeometry(0.07, 8, 6), E.dark, kn);
-      const lo = new THREE.Group(); kn.add(lo); mk(rbox(0.07, 0.07, 0.8, 0.02).translate(0, 0, -0.4), E.steel, lo); mk(new THREE.ConeGeometry(0.05, 0.15, 6).rotateX(-Math.PI / 2).translate(0, 0, -0.85), E.dark, lo);
-      this.legs.push({ hip, up, kn, lo, sx, sz, ph: (sx * sz > 0 ? 0 : Math.PI) });
-    }
+    const m = buildCrawler(); this.root.add(m.root); Object.assign(this, { body: m.body, head: m.head, eye: m.eye, eyeMesh: m.eyeMesh, eyeHalo: m.eyeHalo, core: m.core, muzzle: m.muzzle, legs: m.legs });
     this.hitboxes = [{ obj: this.body, r: 0.55, mult: 1, tag: 'body' }, { obj: this.head, r: 0.22, mult: 1.6, tag: 'head' }, { obj: this.core, r: 0.14, mult: 3, tag: 'core' }];
     this.gait = 0; this.hum = audio.loop('servo');
   }
   eyePos(out) { return this.eye.getWorldPosition(out); }
-  puppetUpdate(dt, t) { if (!this.alive) return this.update(dt, t); const moved = this.puppetBase(dt); this.pos.y = this.game.world.col.groundAt(this.pos.x, this.pos.z, this.pos.y + 0.6).y; this.root.position.copy(this.pos); this.root.rotation.y = this.yaw; this.gaitAnim(moved, moved / Math.max(dt, 1e-3)); this.head.rotation.x = this.netPitch; this.eye.material = this.netFlags & 2 ? emats().eye : emats().eyeAlert; }
-  gaitAnim(moved, spd) { this.gait += moved * 4; for (const L of this.legs) { const s = Math.sin(this.gait + L.ph); L.up.rotation.x = 0.55 + Math.max(0, s) * 0.35; L.kn.rotation.x = -1.6 - Math.max(0, s) * 0.3; L.hip.rotation.y = Math.cos(this.gait + L.ph) * 0.3 * Math.min(1, spd); } this.body.position.y = 0.75 + Math.abs(Math.sin(this.gait * 2)) * 0.04; }
+  puppetUpdate(dt, t) { if (!this.alive) return this.update(dt, t); const moved = this.puppetBase(dt); this.pos.y = this.game.world.col.groundAt(this.pos.x, this.pos.z, this.pos.y + 0.6).y; this.root.position.copy(this.pos); this.root.rotation.y = this.yaw; this.gaitAnim(moved, moved / Math.max(dt, 1e-3)); this.head.rotation.x = this.netPitch; this.glowState(this.netFlags & 2 ? 1 : 0, t); }
+  glowState(alert, t) { const M = mmats(); const a = alert > 0.5; if (this.eyeMesh) this.eyeMesh.material = a ? M.eye : M.eyeCalm; this.eyeHalo.material = a ? M.halo : M.haloCalm; this.eyeHalo.scale.setScalar((a ? 0.7 : 0.45) * (1 + Math.sin(t * (a ? 12 : 2.5)) * 0.12)); }
+  gaitAnim(moved, spd) { this.gait += moved * 4.5; const k = Math.min(1, spd); for (const L of this.legs) { const s = Math.sin(this.gait + L.ph); L.up.rotation.x = 0.5 + Math.max(0, s) * 0.4 * k; L.kn.rotation.x = -1.85 - Math.max(0, s) * 0.25 * k; L.hip.rotation.y = Math.cos(this.gait + L.ph) * 0.32 * k * -L.sx; } this.body.position.y = 0.65 + Math.abs(Math.sin(this.gait * 2)) * 0.035; this.body.rotation.z = Math.sin(this.gait) * 0.03 * k; }
   update(dt, t) {
-    if (!this.alive) { this.deadT = (this.deadT || 0) + dt; this.body.position.y = Math.max(0.2, 0.75 - this.deadT * 2); this.body.rotation.z = Math.min(0.4, this.deadT); return; }
+    if (!this.alive) { this.deadT = (this.deadT || 0) + dt; this.body.position.y = Math.max(0.2, 0.65 - this.deadT * 2); this.body.rotation.z = Math.min(0.4, this.deadT); for (const L of this.legs) { L.up.rotation.x = Math.max(-0.2, L.up.rotation.x - dt * 2); L.kn.rotation.x = Math.min(-0.6, L.kn.rotation.x + dt * 3); } this.eyeHalo.visible = false; return; }
     const P = this.player, W = this.game.world; const see = this.canSee(55); this.tickEngage(dt, see);
     if (see) { this.seeT += dt; this.alert = 1; this.lastSeen = P.pos.clone(); if (this.seeT > 0.3) this.state = 'attack'; } else this.seeT = 0;
     let target = null, spd = 0;
@@ -218,7 +182,7 @@ export class Crawler extends Enemy {
     this.root.position.copy(this.pos); this.root.rotation.y = this.yaw;
     this.gaitAnim(moved, spd);
     if (this.lastSeen && this.state === 'attack') { const want = Math.atan2(this.lastSeen.y + 1 - (this.pos.y + 0.9), Math.hypot(this.lastSeen.x - this.pos.x, this.lastSeen.z - this.pos.z)); this.head.rotation.x = want; this.pitch = want; }
-    this.eye.material = this.alert > 0.5 ? emats().eye : emats().eyeAlert;
+    this.glowState(this.alert, t);
     this.hum?.set(this.pos, spd > 0 ? 0.08 : 0.03);
   }
   die() { this.alive = false; this.hum?.stop(); this.hum = null; this.game.fx.explosion(this.pos.clone().setY(this.pos.y + 0.8), 0.6); audio.explosion(this.pos, 0.6); this.dropLoot('m_crawler'); }
@@ -228,48 +192,19 @@ export class Crawler extends Enemy {
 export class Strider extends Enemy {
   constructor(game, pos) {
     super(game, pos, { hp: 1800 }); this.type = 'strider'; this.name = 'Juggernaut Strider';
-    const E = emats(), R = this.root; R.scale.setScalar(1);
-    this.pelvis = new THREE.Group(); this.pelvis.position.y = 4.2; R.add(this.pelvis);
-    mk(rbox(2.2, 1.0, 1.6, 0.2), E.dark, this.pelvis);
-    this.torso = new THREE.Group(); this.torso.position.y = 0.6; this.pelvis.add(this.torso);
-    mk(rbox(3.0, 1.8, 2.4, 0.3), E.hull, this.torso, 0, 0.9, 0);
-    mk(rbox(2.6, 0.5, 2.6, 0.15), E.dark, this.torso, 0, 1.9, 0.1);
-    for (const sx of [-1, 1]) mk(rbox(0.12, 1.2, 1.8, 0.04), E.orange, this.torso, sx * 1.52, 0.9, 0);
-    this.eye = mk(new THREE.SphereGeometry(0.25, 16, 12), E.eye, this.torso, 0, 1.1, -1.25);
-    mk(rbox(1.2, 0.5, 0.3, 0.08), E.dark, this.torso, 0, 1.1, -1.15);
-    // weak point: exposed reactor core on the back
-    this.core = mk(new THREE.SphereGeometry(0.42, 18, 12), E.core, this.torso, 0, 1.0, 1.3);
-    mk(new THREE.TorusGeometry(0.5, 0.08, 8, 20), E.steel, this.torso, 0, 1.0, 1.25);
-    // chaingun arm (right) + rocket pod (left)
-    this.gunArm = new THREE.Group(); this.gunArm.position.set(1.9, 1.1, 0); this.torso.add(this.gunArm);
-    mk(rbox(0.7, 0.7, 1.0, 0.12), E.dark, this.gunArm);
-    this.barrels = new THREE.Group(); this.barrels.position.z = -1.2; this.gunArm.add(this.barrels);
-    for (let i = 0; i < 6; i++) { const a = i / 6 * 6.28; mk(cylZ(0.07, 1.6), E.steel, this.barrels, Math.cos(a) * 0.18, Math.sin(a) * 0.18, 0); }
-    mk(cylZ(0.3, 0.2, 16), E.steel, this.barrels, 0, 0, 0.5);
-    this.muzzle = new THREE.Object3D(); this.muzzle.position.z = -0.85; this.barrels.add(this.muzzle);
-    this.pod = new THREE.Group(); this.pod.position.set(-1.9, 1.6, 0.2); this.torso.add(this.pod);
-    mk(rbox(0.8, 0.8, 1.2, 0.1), E.hull, this.pod); for (let i = 0; i < 4; i++) mk(new THREE.CylinderGeometry(0.1, 0.1, 0.05, 10).rotateX(Math.PI / 2), E.dark, this.pod, (i % 2 - 0.5) * 0.36, (Math.floor(i / 2) - 0.5) * 0.36, -0.61);
-    this.legs = [];
-    for (const sx of [-1, 1]) {
-      const hip = new THREE.Group(); hip.position.set(sx * 1.2, 0, 0); this.pelvis.add(hip);
-      mk(new THREE.SphereGeometry(0.45, 14, 10), E.dark, hip);
-      const th = new THREE.Group(); hip.add(th); mk(rbox(0.6, 2.4, 0.7, 0.12).translate(0, -1.2, 0), E.hull, th);
-      for (let i = 0; i < 3; i++) mk(new THREE.CylinderGeometry(0.05, 0.05, 2.0, 6), E.rubber, th, sx * 0.35, -1.1, -0.2 + i * 0.2); // hydraulics
-      const kn = new THREE.Group(); kn.position.y = -2.4; th.add(kn); mk(new THREE.SphereGeometry(0.35, 12, 10), E.dark, kn);
-      const sh = new THREE.Group(); kn.add(sh); mk(rbox(0.45, 2.2, 0.5, 0.1).translate(0, -1.1, 0), E.hull, sh);
-      const ft = new THREE.Group(); ft.position.y = -2.2; sh.add(ft); mk(rbox(1.0, 0.3, 1.6, 0.08), E.dark, ft, 0, -0.1, -0.2);
-      for (const tz of [-0.9, 0.5]) mk(new THREE.ConeGeometry(0.15, 0.4, 6).rotateX(tz < 0 ? -Math.PI / 2 : Math.PI / 2), E.steel, ft, 0, -0.15, tz);
-      this.legs.push({ hip, th, kn, sh, ft, sx });
-    }
+    const m = buildStrider(); this.root.add(m.root); Object.assign(this, { pelvis: m.pelvis, torso: m.torso, eye: m.eye, eyeHalo: m.eyeHalo, core: m.core, gunArm: m.gunArm, barrels: m.barrels, muzzle: m.muzzle, pod: m.pod, legs: m.legs });
     this.hitboxes = [{ obj: this.torso, r: 1.6, mult: 0.6, tag: 'armor', off: new THREE.Vector3(0, 0.9, 0) }, { obj: this.eye, r: 0.35, mult: 1.5, tag: 'eye' }, { obj: this.core, r: 0.5, mult: 3.5, tag: 'core' }, { obj: this.pelvis, r: 1.1, mult: 0.5, tag: 'armor' }];
     this.gait = 0; this.spin = 0; this.rocketCD = 6; this.hum = audio.loop('engine'); this.stepSide = 0;
     this.col = game.world.col.box(pos.x, pos.z, 2.6, 2.4, pos.y, pos.y + 7.5, 0, 'metal', { walk: false, noRay: true });
   }
   eyePos(out) { return this.eye.getWorldPosition(out); }
   puppetUpdate(dt, t) { if (!this.alive) return this.update(dt, t); const moved = this.puppetBase(dt); this.pos.y = this.game.world.terrain.height(this.pos.x, this.pos.z); this.root.position.copy(this.pos); this.root.rotation.y = this.yaw; this.gait += moved * 1.1; this.legAnim(1); if (this.netFlags & 2) { this.spin += dt * 18; this.barrels.rotation.z = this.spin; } this.gunArm.rotation.x += (this.netPitch - this.gunArm.rotation.x) * dt * 3; Object.assign(this.col, { x: this.pos.x, z: this.pos.z }); this.hum?.set(this.pos, 0.35); }
-  legAnim(spd) { for (const L of this.legs) { const s = Math.sin(this.gait + (L.sx > 0 ? Math.PI : 0)); L.th.rotation.x = s * 0.35 * Math.min(1, spd) + 0.3; L.kn.rotation.x = -0.6 - Math.max(0, -s) * 0.4 * Math.min(1, spd); L.sh.rotation.x = 0; L.ft.rotation.x = 0.3 - L.th.rotation.x - L.kn.rotation.x; } this.pelvis.position.y = 4.2 + Math.abs(Math.cos(this.gait)) * 0.15; }
+  legAnim(spd) { // reverse-jointed (bird-like) stride: thigh swings back, shin forward, foot kept level
+    const k = Math.min(1, spd);
+    for (const L of this.legs) { const s = Math.sin(this.gait + (L.sx > 0 ? Math.PI : 0)), lift = Math.max(0, Math.cos(this.gait + (L.sx > 0 ? Math.PI : 0))) * k; L.th.rotation.x = -0.45 + s * 0.32 * k - lift * 0.15; L.kn.rotation.x = 1.0 + lift * 0.45; L.ft.rotation.x = -(L.th.rotation.x + L.kn.rotation.x); }
+    this.pelvis.position.y = 4.55 + Math.abs(Math.cos(this.gait)) * 0.12; this.torso.rotation.z = Math.sin(this.gait) * 0.025 * k; }
   update(dt, t) {
-    if (!this.alive) { this.deadT = (this.deadT || 0) + dt; this.pelvis.rotation.x = Math.min(1.2, this.deadT * this.deadT * 0.8); this.pelvis.position.y = Math.max(1.4, 4.2 - this.deadT * 1.5); return; }
+    if (!this.alive) { this.deadT = (this.deadT || 0) + dt; this.pelvis.rotation.x = Math.min(1.2, this.deadT * this.deadT * 0.8); this.pelvis.position.y = Math.max(1.6, 4.55 - this.deadT * 1.5); for (const L of this.legs) { L.th.rotation.x = Math.max(-1.4, L.th.rotation.x - dt); L.kn.rotation.x = Math.min(2.2, L.kn.rotation.x + dt * 1.4); } this.eyeHalo.visible = false; return; }
     const P = this.player, W = this.game.world; const see = this.canSee(110, 2.6); this.tickEngage(dt, see);
     if (see) { this.seeT += dt; this.alert = 1; this.lastSeen = P.pos.clone(); if (this.seeT > 0.5) this.state = 'attack'; } else this.seeT = 0;
     let spd = 0, target = null;
@@ -295,6 +230,7 @@ export class Strider extends Enemy {
     this.legAnim(spd);
     this.root.position.copy(this.pos); this.root.rotation.y = this.yaw;
     if (this.lastSeen && this.state === 'attack') { const want = Math.atan2(this.lastSeen.y + 1 - (this.pos.y + 6), Math.hypot(this.lastSeen.x - this.pos.x, this.lastSeen.z - this.pos.z)); this.gunArm.rotation.x += (want - this.gunArm.rotation.x) * dt * 3; this.pitch = this.gunArm.rotation.x; }
+    const M = mmats(), a = this.state === 'attack'; this.eyeHalo.material = a ? M.halo : M.haloCalm; this.eyeHalo.scale.setScalar((a ? 2.0 : 1.4) * (1 + Math.sin(t * (a ? 9 : 2)) * 0.1));
     this.hum?.set(this.pos, 0.35);
   }
   die() { this.alive = false; this.hum?.stop(); this.hum = null; const p = this.pos.clone().setY(this.pos.y + 5); this.game.fx.explosion(p, 2.2); audio.explosion(p, 2); this.game.shake(1.2); this.dropLoot('m_strider'); this.game.world.col.remove(this.col); }
@@ -303,17 +239,8 @@ export class Strider extends Enemy {
 // ------------------------------------------------------------------ Sentinel turret (static, scanning laser)
 export class Sentinel extends Enemy {
   constructor(game, pos) {
-    super(game, pos, { hp: 260 }); this.type = 'sentinel'; this.name = 'Sentinel Turret';
-    const E = emats(), R = this.root;
-    for (let i = 0; i < 3; i++) { const a = i / 3 * 6.28; mk(rbox(0.12, 1.6, 0.12, 0.03), E.dark, R, Math.cos(a) * 0.5, 0.7, Math.sin(a) * 0.5, Math.sin(a) * 0.35, 0, -Math.cos(a) * 0.35); }
-    mk(new THREE.CylinderGeometry(0.35, 0.45, 0.4, 14), E.hull, R, 0, 1.55, 0);
-    this.head = new THREE.Group(); this.head.position.y = 2.0; R.add(this.head);
-    mk(rbox(0.7, 0.5, 0.8, 0.1), E.hull, this.head);
-    mk(rbox(0.5, 0.2, 0.6, 0.05), E.orange, this.head, 0, 0.3, 0.05);
-    this.eye = mk(new THREE.SphereGeometry(0.1, 12, 8), E.eye, this.head, 0, 0.05, -0.42);
-    mk(cylZ(0.05, 0.7), E.steel, this.head, 0.22, -0.1, -0.5);
-    this.muzzle = new THREE.Object3D(); this.muzzle.position.set(0.22, -0.1, -0.85); this.head.add(this.muzzle);
-    this.beam = mk(new THREE.CylinderGeometry(0.012, 0.012, 1, 6).rotateX(Math.PI / 2).translate(0, 0, -0.5), E.beam, this.head, 0, 0.05, -0.45); this.beam.castShadow = false;
+    super(game, pos, { hp: 260 }); this.type = 'sentinel'; this.name = 'Sentinel Pylon';
+    const m = buildSentinel(); this.root.add(m.root); Object.assign(this, { head: m.head, ring: m.ring, eye: m.eye, eyeHalo: m.eyeHalo, muzzle: m.muzzle, beam: m.beam });
     this.hitboxes = [{ obj: this.head, r: 0.5, mult: 1, tag: 'head' }, { obj: this.eye, r: 0.13, mult: 2.5, tag: 'eye' }];
     this.scan = Math.random() * 6; this.yaw = Math.random() * 6.28; this.col = game.world.col.box(pos.x, pos.z, 1.0, 1.0, pos.y, pos.y + 2.3, 0, 'metal', { noRay: true });
   }
@@ -329,8 +256,47 @@ export class Sentinel extends Enemy {
     // beam length to first obstacle
     const o = this.eye.getWorldPosition(_a), d = _b.set(-Math.sin(this.yaw), -0.05, -Math.cos(this.yaw)).normalize(); const h = this.game.world.col.ray(o, d, 60); this.beam.scale.z = h ? h.t : 60;
     this.beam.material.opacity = 0.35 + Math.sin(t * 20) * 0.1;
+    this.ring.rotation.y += dt * (this.state === 'attack' ? 4 : 0.8);
+    const M = mmats(), a = this.state === 'attack'; this.eye.material = a ? M.eye : M.eyeCalm; this.eyeHalo.material = a ? M.halo : M.haloCalm;
   }
-  die() { this.alive = false; this.game.fx.explosion(this.head.getWorldPosition(V()), 0.6); audio.explosion(this.pos, 0.5); this.dropLoot('m_drone'); }
+  die() { this.eyeHalo.visible = false; this.alive = false; this.game.fx.explosion(this.head.getWorldPosition(V()), 0.6); audio.explosion(this.pos, 0.5); this.dropLoot('m_drone'); }
+}
+
+// ------------------------------------------------------------------ Tick (kamikaze mine on legs)
+export class Tick extends Enemy {
+  constructor(game, pos, tier, opts = {}) {
+    super(game, pos, { hp: 30, id: opts.id }); this.type = 'tick'; this.name = 'Tick';
+    const m = buildTick(); this.root.add(m.root); Object.assign(this, { body: m.body, light: m.light, eye: m.eye, glow: m.glow, legs: m.legs });
+    this.hitboxes = [{ obj: this.body, r: 0.3, mult: 1, tag: 'body' }];
+    this.gait = Math.random() * 6; this.armT = -1; this.beepT = 0;
+  }
+  eyePos(out) { return out.copy(this.pos).setY(this.pos.y + 0.4); }
+  anim(moved, t) {
+    this.gait += moved * 9; for (const L of this.legs) { const s = Math.sin(this.gait + L.ph); L.up.rotation.x = 0.7 + Math.max(0, s) * 0.45; L.kn.rotation.x = -1.9 - Math.max(0, s) * 0.2; }
+    this.body.position.y = 0.3 + Math.abs(Math.sin(this.gait)) * 0.03;
+    const M = mmats(), hot = this.state === 'attack'; const rate = this.armT >= 0 ? 30 : hot ? 10 : 2; const on = Math.sin(t * rate + this.id) > 0;
+    this.light.material = hot ? M.eye : M.eyeCalm; this.glow.material = hot ? M.halo : M.haloCalm; this.glow.visible = on || !hot; this.glow.scale.setScalar(this.armT >= 0 ? 0.9 : 0.5);
+  }
+  puppetUpdate(dt, t) { if (!this.alive) return; const moved = this.puppetBase(dt); this.pos.y = this.game.world.col.groundAt(this.pos.x, this.pos.z, this.pos.y + 0.6).y; this.root.position.copy(this.pos); this.root.rotation.y = this.yaw; this.state = this.netFlags & 2 ? 'attack' : 'idle'; this.anim(moved, t); }
+  update(dt, t) {
+    if (!this.alive) return;
+    const P = this.player, W = this.game.world; const see = this.canSee(45, 3.2);
+    if (see) { this.alert = 1; this.lastSeen = P.pos.clone(); if (this.state !== 'attack') { this.state = 'attack'; if (this.pos.distanceTo(this.game.player.pos) < 50) audio.click(1800, 0.06, 0.25, 'square'); } }
+    let spd = 0, target = null;
+    if (this.armT >= 0) { // armed: shriek faster and faster, then detonate
+      this.armT += dt; this.beepT -= dt; if (this.beepT <= 0) { this.beepT = Math.max(0.05, 0.22 - this.armT * 0.3); if (this.pos.distanceTo(this.game.player.pos) < 50) audio.click(2400, 0.08, 0.04, 'square'); }
+      if (this.armT > 0.7) { this.detonate(); return; }
+    } else if (this.state === 'attack' && this.lastSeen) {
+      target = see ? P.pos : this.lastSeen; spd = 8.5; this.turnTo(target, dt, 7);
+      if (see && this.pos.distanceTo(P.pos) < 2.6) { this.armT = 0; this.beepT = 0; }
+      if (!see && this.pos.distanceTo(this.lastSeen) < 2) this.state = 'search';
+    } else { this.wanderT -= dt; if (this.wanderT <= 0) { this.wanderT = 3 + Math.random() * 5; this.wander.set(this.home.x + (Math.random() - 0.5) * 20, 0, this.home.z + (Math.random() - 0.5) * 20); } target = this.wander; spd = Math.hypot(target.x - this.pos.x, target.z - this.pos.z) > 1.5 ? 1.4 : 0; this.turnTo(target, dt, 3); }
+    const ox = this.pos.x, oz = this.pos.z; this.pos.x -= Math.sin(this.yaw) * spd * dt; this.pos.z -= Math.cos(this.yaw) * spd * dt;
+    const [rx, rz] = W.col.resolve(this.pos.x, this.pos.z, 0.35, this.pos.y, 0.6); this.pos.x = rx; this.pos.z = rz; this.pos.y = W.col.groundAt(rx, rz, this.pos.y + 0.6).y;
+    this.root.position.copy(this.pos); this.root.rotation.y = this.yaw; this.anim(Math.hypot(rx - ox, rz - oz), t);
+  }
+  detonate() { if (!this.alive) return; this.alive = false; this.hp = 0; this.root.visible = false; this.game.explode(this.pos.clone().setY(this.pos.y + 0.4), 5, 60, 'tick'); this.game.net?.event('ek', [this.id, '']); }
+  die(remote) { const wasAlive = this.alive !== false || remote; this.alive = false; this.root.visible = false; if (!wasAlive) return; this.game.explode(this.pos.clone().setY(this.pos.y + 0.4), 3, 25, 'tick', !!remote || this.puppet); }
 }
 
 // ------------------------------------------------------------------ Raider (hostile human, low-poly operator) with squad tactics
@@ -339,7 +305,8 @@ const RAIDER_GUNS = { rifle: [['akm', {}], ['ak74', { optic: 'reddot' }], ['ar',
 const AMMO_OF = (id) => WEAPONS[id].ammo;
 export class Raider extends Enemy {
   constructor(game, pos, tier = 0, opts = {}) {
-    super(game, pos, { hp: 110 + tier * 30, id: opts.id }); this.type = 'raider'; this.name = 'Raider'; this.tier = tier;
+    super(game, pos, { hp: 60 + tier * 20, id: opts.id }); this.type = 'raider'; this.name = 'Raider'; this.tier = tier;
+    this.shield = this.maxShield = 40 + tier * 15; this.shieldT = 99; this.bubble = makeShieldBubble(); this.root.add(this.bubble);
     const r = opts.rand || Math.random; const D = game.ai.doctrine;
     this.op = new Operator(r() < 0.5 ? 'raider' : 'raiderB', { pack: 1 + Math.floor(r() * 2) }); this.root.add(this.op.root);
     // loadout biased by doctrine: more shotguns vs rushers, marksmen vs campers / long-range players
@@ -384,6 +351,7 @@ export class Raider extends Enemy {
     this.flinch = false;
   }
   update(dt, t) {
+    if (this.maxShield && this.alive) { this.shieldT += dt; if (this.shieldT > 5 && this.shield < this.maxShield) this.shield = Math.min(this.maxShield, this.shield + 10 * dt); }
     const W = this.game.world, P = this.player, ai = this.game.ai;
     if (!this.alive) { this.op.update(dt, { dead: true, speed: 0 }); return; }
     const see = this.canSee(85); this.see = see; this.tickEngage(dt, see);

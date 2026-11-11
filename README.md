@@ -1,6 +1,6 @@
 # Dropzone
 
-A browser extraction shooter built with three.js. Drop into the 1 km² **Ashgrove hotzone** (12 districts, 6 extraction LZs) in a drop pod,
+A browser extraction shooter built with three.js. Drop into the 1 km² **Ashgrove hotzone** (12 districts, 6 extraction LZs) by helicopter,
 strip it for salvage, fight machines and raiders, then make it to an active landing zone and call
 the lift before the storm hits. Everything you carry in is lost if you die. What you extract goes
 into your stash at **Haven**, your base, where you build structures, craft weapons and fit attachments.
@@ -13,6 +13,43 @@ npm start
 ```
 
 Then open http://localhost:3000. Click the game to capture the mouse.
+
+## Shields and health
+
+You only have **40 HP**. What keeps you alive is a belt-mounted **energy shield** (Light 40 / Medium 70 /
+Heavy 110 capacity). It soaks every hit until it breaks, with a blue hex shimmer and a crack when it goes.
+After 4 s without taking damage it recharges by itself (7–9 per second depending on the model), or you can
+slam a **Shield Cell** (`G`) to refill half of it in 1.6 s. Once the shield is down every bullet goes
+straight into your health and can start bleeding. Raiders carry shields too: blue sparks mean you are
+still on their shield. If you die without a spare shield in the stash, the quartermaster issues a Light Shield.
+
+## The machines
+
+The machines are modelled in geometry rather than texture detail: chamfered ceramic armour over gunmetal
+frames, pistons, lathe-turned sensor housings, ducted fans and glowing optics. Calm machines glow amber
+and alert ones glow red.
+
+- **Gnat Hunter Drone:** a single red eye under an armoured brow, four ducted fans on swept insect arms and an under-slung twin plasma gun. A red targeting laser telegraphs each burst.
+- **Skitter:** a six-legged hunter with a tripod gait, a four-eye sensor cluster, twin emitters and an exposed blue core in its ribbed abdomen (weak point).
+- **Tick:** a kamikaze mine on legs that travels with crawlers and Striders. It sprints at you, shrieks faster and faster, then detonates (around 35 shield damage on its own).
+- **Juggernaut Strider:** a reverse-jointed walker with a red visor slit, a caged reactor on its back (weak point), a six-barrel chaingun and a nine-tube rocket pod.
+- **Sentinel Pylon:** an anchored turret with a rotating sensor ring, a rail gun and a scanning laser.
+
+Huge derelict walkers lie half-buried across the map as landmarks.
+
+## Performance
+
+Graphics quality has four presets. **Low** and **Medium** target 30 fps on integrated GPUs such as old
+Chromebooks, and Chromebooks and machines with 4 or fewer cores start on Low. What changes:
+
+- Static geometry is merged per 128 m cell and material. Trees, rocks and grass are instanced per cell. Everything is culled by a per-quality draw distance hidden in thicker fog.
+- Characters, guns, vehicles and machines merge their rigid parts. A raider (body + gun) went from 159 meshes to 53 and a vehicle from about 130 to 21–34.
+- Low draws straight to the canvas with no post-processing. It uses a 1024 shadow map over a ±32 m area, refreshed every other frame, a cheaper terrain shader, half-resolution textures, sparser grass and a small light budget.
+- Dynamic resolution scales the render resolution down when the frame rate drops below 30 and back up when there is headroom.
+- Distant calm hostiles think at a reduced rate. One shared headlight replaces one spotlight per vehicle.
+
+In a typical raid view on Low this cut draw calls (including the shadow pass) from about 5,200 to 650–710, triangles from 3.7 M to 0.85 M and lights from 38 to 9.
+Add `?q=low` to the URL to force a preset.
 
 ## Teams and shared bases
 
@@ -31,7 +68,7 @@ Set your callsign on the main menu.
 
 ## The loop
 
-1. **Haven (base).** Press `Tab` to pack your backpack from the stash and equip weapons, armor and a pack.
+1. **Haven (base).** Press `Tab` to pack your backpack from the stash and equip weapons, a shield and a pack.
    Press `B` to build. Use your benches (`E`) to craft.
 2. **Deploy.** Use the *Flight Ops Console* (or walk up to the helicopter on the pad) and pick an
    insertion point. A utility helicopter flies you in from the map edge, flares into a hover, and you
@@ -66,7 +103,7 @@ use the arrow keys.
 ## Carry weight
 
 Every item has a real weight in kg: weapons and their attachments, loaded magazines, ammo by the round,
-armour, plates, meds and every resource. Your total sets your encumbrance band (Light to Overloaded).
+shields, shield cells, meds and every resource. Your total sets your encumbrance band (Light to Overloaded).
 Heavier loads slow you down, drain stamina faster, lower your jump, make your sights sway more, and
 make your footsteps louder. Above 48 kg you can't sprint.
 
@@ -100,7 +137,7 @@ or on any floor.
 
 | Piece | Effect |
 | --- | --- |
-| Workbench | Craft weapons, ammo, armor, backpacks and plates. Each extra bench raises its level (max 3). |
+| Workbench | Craft weapons, ammo, shields, backpacks and shield cells. Each extra bench raises its level (max 3). |
 | Gunsmith Bench | Craft attachments and fit them to your weapons, with a live 3D preview. |
 | Med Station | Craft bandages, trauma kits and stims. |
 | Storage Locker | +20 stash capacity each. |
@@ -144,7 +181,7 @@ shows up on the model.
 | R | Reload |
 | 1, 2, wheel | Switch weapon |
 | E (hold) | Interact, search, salvage |
-| Q / G | Heal / insert armor plate |
+| Q / G | Heal / use a shield cell |
 | Tab / M | Inventory / map |
 | V | Toggle first / third person |
 | L | Weapon light |

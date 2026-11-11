@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { TEX } from './textures.js';
+import { mergeRigid, collectRefs } from './geom.js';
 
 const gc = new Map();
 const G = (k, f) => { if (!gc.has(k)) { const g = f(); g.userData.shared = true; gc.set(k, g); } return gc.get(k); };
@@ -132,6 +133,7 @@ export class Operator {
     this.gun = null;
     this.phase = 0; this.t = 0; this.blend = { crouch: 0, air: 0, sprint: 0, aim: 0 };
     this.dead = 0;
+    mergeRigid(this.root, collectRefs(this)); // ~60 body parts -> one mesh per material per bone
     this.root.traverse((o) => { if (o.isMesh) o.userData.char = this; });
   }
   setPack(tier) {

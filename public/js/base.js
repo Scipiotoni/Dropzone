@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { makeNoise, seeded } from './noise.js';
 import { Batcher, CollisionWorld, boxGeo, cylGeo, scaleUV } from './geom.js';
 import { Terrain } from './terrain.js';
-import { smooth } from './textures.js';
+import { smooth, QNAME } from './textures.js';
+import { QUALITY } from './engine.js';
 import * as P from './props.js';
 import { PIECES } from './items.js';
 
@@ -72,7 +73,7 @@ export function buildBase(scene) {
   root.add(P.makeTrees(W, ts, rand));
   const rs = []; for (let i = 0; i < 160; i++) { const x = (rand() - 0.5) * 300, z = (rand() - 0.5) * 300; const r = Math.hypot(x * 0.8, (z - 5) * 0.9); if (r < 50) continue; rs.push({ x, z, y: terrain.height(x, z), s: 1.5 + rand() * 4 }); }
   root.add(P.makeRocks(W, rs, rand));
-  root.add(terrain.grass(18000, rand, (x, z) => (x > -59 && x < -40 && z > -19 && z < 12) || x > PLOT.x0 - 3 && x < PLOT.x0 + PLOT.nx * CELL + 3 && z > PLOT.z0 - 45 && z < PLOT.z0 + PLOT.nz * CELL + 3));
+  root.add(terrain.grass(Math.round(18000 * (QUALITY[QNAME]?.grass ?? 1)), seeded(5151), (x, z) => (x > -59 && x < -40 && z > -19 && z < 12) || x > PLOT.x0 - 3 && x < PLOT.x0 + PLOT.nx * CELL + 3 && z > PLOT.z0 - 45 && z < PLOT.z0 + PLOT.nz * CELL + 3));
   W.home = buildHome(W, root, rand);
   W.batch.build(root);
   // plot border markers

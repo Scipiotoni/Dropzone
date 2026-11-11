@@ -54,7 +54,7 @@ class ParticleSystem {
 }
 const _c = new THREE.Color();
 const C = (h) => new THREE.Color(h);
-const COLORS = { spark: C(0xffc070), spark2: C(0xff6020), fire: C(0xffa040), fire2: C(0x802010), smoke: C(0x5a5650), dust: C(0x8a7a62), blood: C(0x5a0a08), oil: C(0x1a1a18), flash: C(0xffd090), white: C(0xffffff), red: C(0xff3020), cyan: C(0x60e0ff), concrete: C(0xa49e94), wood: C(0x8a6a44) };
+const COLORS = { spark: C(0xffc070), spark2: C(0xff6020), fire: C(0xffa040), fire2: C(0x802010), smoke: C(0x5a5650), dust: C(0x8a7a62), blood: C(0x5a0a08), oil: C(0x1a1a18), flash: C(0xffd090), white: C(0xffffff), red: C(0xff3020), cyan: C(0x60e0ff), shield: C(0x6ad8ff), shield2: C(0x2060ff), concrete: C(0xa49e94), wood: C(0x8a6a44) };
 
 export class Effects {
   constructor(scene, world) {
@@ -100,6 +100,8 @@ export class Effects {
   streak(a, b, color = 0xffd080, k = 1) { if (this.streaks.length < 380) this.streaks.push([a.x, a.y, a.z, b.x, b.y, b.z, color, k]); }
   impact(p, n, mat = 'concrete', big = 1) {
     const N = n || new THREE.Vector3(0, 1, 0);
+    if (mat === 'shield') { for (let i = 0; i < 9 * big; i++) this.add.emit({ p, v: rnd(N, 4, 3), life: 0.2 + Math.random() * 0.25, s0: 0.06, s1: 0.01, c: COLORS.shield, c1: COLORS.shield2, g: 2, drag: 4 }); this.flashLight(p, 5 * big, 0x50b8ff, 0.05, 5); return; }
+    if (mat === 'shieldbreak') { for (let i = 0; i < 40; i++) this.add.emit({ p, v: rnd(N, 6, 5), life: 0.3 + Math.random() * 0.5, s0: 0.09, s1: 0.01, c: COLORS.white, c1: COLORS.shield2, g: 3, drag: 2.5 }); this.flashLight(p, 14, 0x60c0ff, 0.12, 8); return; }
     if (mat === 'flesh') { for (let i = 0; i < 8; i++) this.norm.emit({ p, v: rnd(N, 1.5, 1.2), life: 0.5, s0: 0.12, s1: 0.4, c: COLORS.blood, a0: 0.8, a1: 0, g: 4, drag: 3 }); return; }
     if (mat === 'machine') { for (let i = 0; i < 10 * big; i++) this.add.emit({ p, v: rnd(N, 7, 4), life: 0.25 + Math.random() * 0.3, s0: 0.05, s1: 0.01, c: COLORS.spark, c1: COLORS.spark2, g: 12, ground: true }); this.norm.emit({ p, v: rnd(N, 0.5, 0.3), life: 0.8, s0: 0.15, s1: 0.6, c: COLORS.oil, a0: 0.5, a1: 0, drag: 2 }); this.flashLight(p, 6, 0xffa050, 0.04, 5); return; }
     if (mat === 'metal') { for (let i = 0; i < 7; i++) this.add.emit({ p, v: rnd(N, 6, 3), life: 0.2 + Math.random() * 0.25, s0: 0.04, s1: 0.01, c: COLORS.spark, c1: COLORS.spark2, g: 12, ground: true }); }

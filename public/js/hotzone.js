@@ -4,8 +4,11 @@ import * as THREE from 'three';
 import { makeNoise, seeded } from './noise.js';
 import { Batcher, CollisionWorld, boxGeo, cylGeo } from './geom.js';
 import { Terrain } from './terrain.js';
-import { smooth } from './textures.js';
+import { smooth, QNAME } from './textures.js';
+import { QUALITY } from './engine.js';
+const GRASSQ = QUALITY[QNAME]?.grass ?? 1;
 import * as P from './props.js';
+import { derelictParts } from './machines.js';
 
 export const MAP_SIZE = 1024, PLAY = 490;
 export const DROP_ZONES = [
@@ -154,8 +157,16 @@ export function buildHotzone(scene, seed = 7) {
     S.box(0.25, 6, 0.25, M.steel, 9.5, 0, 2, 0, { m: 'metal' }); S.part(boxGeo(0.6, 0.3, 0.4), M.emWarm, 9.5, 6, 2);
     W.extracts.push({ ...e, center: new THREE.Vector3(x, y + 0.15, z), console: S.world(9.2, 0, 0), active: false });
   }
+  // ---- derelict colossi: huge dead walkers half-buried in the fields (landmarks; merged into the static batches)
+  const DERELICTS = [[-265, 15, 3.2, 0.6], [250, 62, 2.6, 2.2], [-30, -300, 3.5, -1.1], [-120, 300, 2.8, 2.9]];
+  const parts = derelictParts(1);
+  for (const [x, z, sc, yaw] of DERELICTS) {
+    const y = H(x, z); const m4 = new THREE.Matrix4().compose(new THREE.Vector3(x, y - sc * 0.6, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(sc, sc, sc));
+    for (const [g, mat] of parts) W.batch.add(g.clone().applyMatrix4(m4), mat);
+    W.col.box(x, z, sc * 3.2, sc * 3.0, y - 1, y + sc * 2.4, yaw, 'metal');
+  }
   // ---- vegetation
-  const avoid = (x, z, r = 3) => roadDist(x, z) < 6 + r || nearPad(pads, x, z, r);
+  const avoid = (x, z, r = 3) => roadDist(x, z) < 6 + r || nearPad(pads, x, z, r) || DERELICTS.some(([dx, dz, sc]) => Math.hypot(x - dx, z - dz) < sc * 4 + r);
   const treeSpots = [];
   for (let i = 0; i < 6500 && treeSpots.length < 1200; i++) { const x = (rand() - 0.5) * 960, z = (rand() - 0.5) * 960; if (avoid(x, z, 4)) continue; const sl = 1 - terrain.normal(x, z).y; if (sl > 0.35) continue;
     const forest = noise.fbm(x / 80 + 3, z / 80, 3); if (forest < -0.02 && rand() > 0.12) continue; treeSpots.push({ x, z, y: H(x, z) }); }
@@ -163,7 +174,7 @@ export function buildHotzone(scene, seed = 7) {
   const rockSpots = [];
   for (let i = 0; i < 2400 && rockSpots.length < 700; i++) { const x = (rand() - 0.5) * 1000, z = (rand() - 0.5) * 1000; if (avoid(x, z, 2)) continue; const d = Math.max(Math.abs(x), Math.abs(z)); const sl = 1 - terrain.normal(x, z).y; const quarry = Math.hypot(x - 410, z + 20) < 45; if (d < 380 && sl < 0.12 && !quarry && rand() < 0.75) continue; rockSpots.push({ x, z, y: H(x, z), s: d > 410 || quarry ? 2 + rand() * 4 : undefined }); }
   root.add(P.makeRocks(W, rockSpots, rand));
-  root.add(terrain.grass(120000, rand, (x, z) => roadDist(x, z) < 5 || nearPad(pads, x, z, 0)));
+  root.add(terrain.grass(Math.round(120000 * GRASSQ), seeded(424242), /* own RNG: density varies per quality, the spawn plan must not */ (x, z) => roadDist(x, z) < 5 || nearPad(pads, x, z, 0)));
   W.batch.build(root);
   // ---- enemy spawn plan (types per district; resolved by the game at raid start)
   const S = (type, x, z, n = 1, spread = 20, tier = 0) => { for (let i = 0; i < n; i++) { const px = x + (rand() - 0.5) * spread, pz = z + (rand() - 0.5) * spread; W.spawns.push({ type, pos: new THREE.Vector3(px, H(px, pz), pz), tier }); } };

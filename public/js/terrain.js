@@ -68,7 +68,8 @@ export class Terrain {
       // cards are lit as if they were the ground (no back-face normal flip, which turned them black)
       sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n normal = normalize(vNormal);');
     };
-    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    // instances are bucketed into 32 m cells, one InstancedMesh each: the distance LOD only draws the cells near the camera
+    const CELL = 32, cells = new Map();
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), col = new THREE.Color();
     let k = 0, tries = 0;
     while (k < count && tries++ < count * 8) {
@@ -76,10 +77,18 @@ export class Terrain {
       const w = this.splatAt(x, z); if (rand() > w[0] * 1.25 - 0.1 || avoid(x, z)) continue;
       const sc = 0.6 + rand() * 0.8;
       m.compose(p.set(x, this.height(x, z) - 0.03, z), q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * 6.28), s.set(sc, sc * (0.7 + rand() * 0.6), sc));
-      mesh.setMatrixAt(k, m); mesh.setColorAt(k, col.setHSL(0.17 + rand() * 0.06, 0.25 + rand() * 0.15, 0.55 + rand() * 0.3)); k++;
+      col.setHSL(0.17 + rand() * 0.06, 0.25 + rand() * 0.15, 0.55 + rand() * 0.3);
+      const key = Math.floor(x / CELL) + ',' + Math.floor(z / CELL); let c = cells.get(key); if (!c) cells.set(key, c = []);
+      c.push(m.clone(), col.clone()); k++;
     }
-    mesh.count = k; mesh.receiveShadow = true; mesh.frustumCulled = false;
-    return mesh;
+    const out = new THREE.Group();
+    for (const list of cells.values()) {
+      const n = list.length / 2; const mesh = new THREE.InstancedMesh(geo, mat, n);
+      for (let i = 0; i < n; i++) { mesh.setMatrixAt(i, list[i * 2]); mesh.setColorAt(i, list[i * 2 + 1]); }
+      mesh.receiveShadow = true; mesh.computeBoundingSphere(); mesh.userData.lod = 'grass';
+      out.add(mesh);
+    }
+    return out;
   }
 }
 
@@ -87,19 +96,19 @@ function makeSplatMaterial() {
   const m = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
   const T = [TEX.grass, TEX.dirt, TEX.rock, TEX.asphalt];
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.terrPom = { get value() { return POM.value; } };
+    sh.uniforms.terrPom = { get value() { return POM.value; } }; sh.uniforms.terrLow = { get value() { return POM.low ? 1 : 0; } };
     ['A', 'B', 'C', 'D'].forEach((k, i) => { sh.uniforms['t' + k] = { value: T[i].map }; sh.uniforms['n' + k] = { value: T[i].normalMap }; });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 splat; varying vec4 vSplat; varying vec3 vWP; varying vec3 vWN;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSplat = splat; vWP = (modelMatrix * vec4(transformed,1.0)).xyz; vWN = normal;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform sampler2D tA, tB, tC, tD, nA, nB, nC, nD; uniform float terrPom; varying vec4 vSplat; varying vec3 vWP; varying vec3 vWN;
+        uniform sampler2D tA, tB, tC, tD, nA, nB, nC, nD; uniform float terrPom, terrLow; varying vec4 vSplat; varying vec3 vWP; varying vec3 vWN;
         vec4 W; vec2 UV;
-        vec3 tri(sampler2D t, vec2 uv) { return texture2D(t, uv).rgb * 0.6 + texture2D(t, uv * 0.27 + 0.37).rgb * 0.4; } // two scales break up tiling`)
+        vec3 tri(sampler2D t, vec2 uv) { if (terrLow > 0.5) return texture2D(t, uv).rgb; return texture2D(t, uv).rgb * 0.6 + texture2D(t, uv * 0.27 + 0.37).rgb * 0.4; } // two scales break up tiling`)
       .replace('#include <map_fragment>', `
         UV = vWP.xz / 4.0;
-        { vec3 Vw = normalize(cameraPosition - vWP); vec3 Nw0 = normalize(vWN); vec3 Tw0 = normalize(vec3(1.0, 0.0, 0.0) - Nw0 * Nw0.x); vec3 Bw0 = cross(Tw0, Nw0);
+        if (terrPom > 0.0) { vec3 Vw = normalize(cameraPosition - vWP); vec3 Nw0 = normalize(vWN); vec3 Tw0 = normalize(vec3(1.0, 0.0, 0.0) - Nw0 * Nw0.x); vec3 Bw0 = cross(Tw0, Nw0);
           vec3 Vt = vec3(dot(Vw, Tw0), -dot(Vw, Bw0), dot(Vw, Nw0)); float hgt = texture2D(nB, UV * 0.8).a * vSplat.y + texture2D(nC, UV * 0.5).a * vSplat.z + texture2D(nA, UV).a * vSplat.x + texture2D(nD, UV * 0.6).a * vSplat.w;
           UV += Vt.xy / max(Vt.z, 0.3) * (hgt - 0.5) * 0.06 * terrPom; }
         float macro = texture2D(tB, vWP.xz / 180.0).r;

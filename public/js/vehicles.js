@@ -4,7 +4,7 @@
 // world boxes. Controls are the same: W/S throttle & brake/reverse, A/D steer, Space handbrake, V camera, E exit,
 // R flip when slow.
 import * as THREE from 'three';
-import { boxGeo, cylGeo } from './geom.js';
+import { boxGeo, cylGeo, mergeRigid, collectRefs, hoistStatic } from './geom.js';
 import { worldMats } from './props.js';
 import { pbr } from './textures.js';
 import { audio } from './audio.js';
@@ -277,7 +277,10 @@ export function makeVehicleModel(type, variant = 0) {
     wheels.push({ pivot, spin, def: w });
   }
   Object.assign(g.userData, { wheels, body, paint });
-  const hl = new THREE.SpotLight(0xfff2d8, 0, 50, 0.6, 0.5, 1.4); hl.position.set(0, 0.2, hz); hl.target.position.set(0, -1, hz + 10); g.add(hl, hl.target); g.userData.headlight = hl;
+  // one shared headlight SpotLight (owned by the game) is parked on this anchor while someone drives at night:
+  // thirty idle SpotLights would sit in every fragment shader's light loop
+  const ha = new THREE.Object3D(); ha.position.set(0, 0.2, hz); g.add(ha); g.userData.headAnchor = ha;
+  const keep = collectRefs(g.userData); hoistStatic(g, keep); mergeRigid(g, keep);
   return g;
 }
 
@@ -323,7 +326,7 @@ export class Vehicle {
       w.pivot.position.y = w.def[1] - this.def.rest + comp; w.pivot.rotation.y = w.def[3] ? (local ? this.sim.steer : this.netSteer || 0) : 0; w.spin.rotation.x = wh.spin;
     });
     const driven = !!(this.seats[0] || this.driverRemote);
-    m.userData.headlight.intensity = driven && this.game.night ? 50 : 0;
+    
     // damage smoke / dust
     if (this.hp < this.def.hp * 0.35) { this.smokeT -= dt; if (this.smokeT <= 0) { this.smokeT = 0.12; this.game.fx.norm.emit({ p: _b.set(0, this.def.half[1], this.def.half[2] * 0.7).applyQuaternion(this.q).add(this.pos), v: n3(0, 1.5, 0), life: 2.5, s0: 0.5, s1: 2.2, c: new THREE.Color(this.hp < this.def.hp * 0.15 ? 0x222222 : 0x777777), a0: 0.6, a1: 0, drag: 0.5 }); } }
     if (local) for (const wh of this.sim.wheels) { if (!wh.contact) continue; const spd = Math.abs(wh.spinV * this.def.wheelR); if (Math.random() < ((spd > 4 ? 0.25 : 0) + wh.slip * 1.5) * dt * 20) this.game.fx.norm.emit({ p: wh.point.clone(), v: n3((Math.random() - 0.5) * 2, 1 + spd * 0.05, (Math.random() - 0.5) * 2), life: 1.6, s0: 0.3, s1: 1.6, c: new THREE.Color(wh.surf.dust), a0: 0.4, a1: 0, drag: 1.2 }); }

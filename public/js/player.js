@@ -7,6 +7,7 @@ import { WEAPONS, ITEMS, weaponStats, DEFAULT_MODS, encumbrance, entryKg, BODY_K
 import { WeaponAnimator } from './anim.js';
 import { Ballistics, CARTRIDGE } from './ballistics.js';
 import { audio } from './audio.js';
+import { makeShieldBubble } from './machines.js';
 
 // Mouse capture: real pointer lock where the browser allows it; otherwise (embedded frames, some app views) a "soft"
 // capture: the hidden cursor's movement steers the camera, the screen edges keep turning, and arrow keys look too.
@@ -50,7 +51,8 @@ export class Player {
   constructor(game) {
     this.game = game; this.pos = new THREE.Vector3(); this.vel = new THREE.Vector3(); this.yaw = 0; this.pitch = 0;
     this.op = new Operator('player'); game.scene.add(this.op.root);
-    this.hp = 100; this.maxHp = 100; this.armor = 0; this.maxArmor = 0; this.stamina = 100; this.dead = false; this.crouch = false; this.onGround = true;
+    this.shield = makeShieldBubble(); this.op.root.add(this.shield);
+    this.hp = 40; this.maxHp = 40; this.armor = 0; this.maxArmor = 0; this.sinceHit = 99; /* armor = energy shield; HP is deliberately low */ this.stamina = 100; this.dead = false; this.crouch = false; this.onGround = true;
     this.weapons = [null, null]; this.slot = 0; this.aimT = 0; this.fireCD = 0; this.reloadT = -1; this.kick = new THREE.Vector2(); this.spreadNow = 0;
     this.fp = false; this.shakeT = 0; this.healT = -1; this.healItem = null; this.lightOn = false; this.bob = 0; this.stepAcc = 0;
     this.anim = new WeaponAnimator(); this.enc = encumbrance(10); this.encT = 0; this.sway = new THREE.Vector2(); this.swayT = 0; this.landImpulse = 0;
@@ -67,7 +69,7 @@ export class Player {
   setLoadout({ primary, secondary, vest, pack, armor }) {
     this.weapons = [primary ? this.makeWeapon(primary) : null, secondary ? this.makeWeapon(secondary) : null];
     if (!this.weapons[0] && this.weapons[1]) this.slot = 1; else this.slot = 0;
-    this.vestId = vest || null; this.maxArmor = vest ? ITEMS[vest].armor : 0; this.armor = armor ?? this.maxArmor;
+    this.vestId = vest || null; this.maxArmor = vest ? ITEMS[vest].armor : 0; this.armor = this.maxArmor; void armor; /* shields are always charged between raids */
     this.packId = pack || 'pack1'; this.op.setPack(+this.packId.slice(-1)); this.op.setVest(vest ? +vest.slice(-1) : 0);
     this.equipCurrent(true);
   }
@@ -100,11 +102,18 @@ export class Player {
   damage(n, from, by) {
     if (this.dead || this.game.godMode) return;
     if (this.vehicle) { const a = this.vehicle.def.armor; this.vehicle.damage(n * a * 2); n *= 1 - a; }
-    let left = n;
-    if (this.armor > 0) { const a = Math.min(this.armor, n * 0.7); this.armor -= a; left -= a; }
-    this.hp -= left; this.game.ui.hurt(from, n); this.flinch = true;
-    if (left >= 14 && Math.random() < 0.35 && !this.bleeding) { this.bleeding = true; this.game.ui.toast('You are bleeding — bandage up (Q)'); }
-    this.healT = -1; audio.hit(this.pos, 'flesh');
+    let left = n; this.sinceHit = 0; this.charging = false;
+    const chest = this.pos.clone().setY(this.pos.y + 1.2);
+    // the energy shield soaks everything until it breaks; after that every hit goes straight into your 40 HP
+    if (this.armor > 0) {
+      const a = Math.min(this.armor, left); this.armor -= a; left -= a; this.shield.userData.flash(0.9);
+      this.game.ui.shieldHit(this.armor <= 0);
+      if (this.armor <= 0) { this.armor = 0; this.shield.userData.flash(1.6, 0xb0e8ff); this.game.fx.impact(chest, null, 'shieldbreak'); audio.click(180, 0.35, 0.35, 'sawtooth'); audio.click(90, 0.5, 0.3, 'square'); this.game.ui.toast('SHIELD BROKEN — get to cover'); }
+      else audio.click(900 + Math.random() * 200, 0.05, 0.12, 'triangle');
+    }
+    if (left > 0) { this.hp -= left; this.game.ui.hurt(from, left); audio.hit(this.pos, 'flesh'); this.healT = -1; }
+    this.flinch = true;
+    if (left >= 8 && Math.random() < 0.35 && !this.bleeding) { this.bleeding = true; this.game.ui.toast('You are bleeding — bandage up (Q)'); }
     this.game.ai?.onPlayerHit(from);
     if (this.hp <= 0) { this.hp = 0; this.dead = true; this.game.onPlayerDeath(by); }
   }
@@ -142,6 +151,13 @@ export class Player {
     this.stimT = Math.max(0, (this.stimT || 0) - dt);
     if (this.bleeding && !this.dead && G.mode === 'raid') { this.bleedT = (this.bleedT || 0) + dt; if (this.bleedT > 1.25) { this.bleedT = 0; this.hp -= 1; if (Math.random() < 0.5) G.fx.impact(this.pos.clone().setY(this.pos.y + 0.05), new THREE.Vector3(0, 1, 0), 'flesh'); if (this.hp <= 0) { this.hp = 0; this.dead = true; G.onPlayerDeath('bleeding'); } } }
     if (G.mode !== 'raid') this.bleeding = false;
+    // shield recharge: kicks in after 4 s without taking damage
+    this.sinceHit += dt; this.shield.userData.tick(dt, G.time);
+    if (!this.dead && this.maxArmor > 0 && this.armor < this.maxArmor && this.sinceHit > 4) {
+      if (!this.charging) { this.charging = true; audio.click(420, 0.25, 0.12, 'sine'); audio.click(840, 0.3, 0.08, 'sine'); }
+      this.armor = Math.min(this.maxArmor, this.armor + (ITEMS[this.vestId]?.regen || 8) * dt);
+      if (this.armor >= this.maxArmor) { this.charging = false; audio.click(1200, 0.12, 0.1, 'sine'); }
+    } else if (this.armor >= this.maxArmor) this.charging = false;
     const wspd = this.weapon?.stats.speed || 1;
     let speed = (sprint ? 6.6 : this.crouch ? 2.2 : aiming ? 2.7 : 4.3) * wspd * (this.healT >= 0 ? 0.5 : 1) * E.speed;
     if (!canAct) speed = 0;
@@ -243,15 +259,15 @@ export class Player {
   }
   startHeal(kind) {
     const G = this.game; let id = null;
-    if (kind === 'plate') { if (!this.vestId) return G.ui.toast('No armor vest equipped'); if (this.armor >= this.maxArmor) return G.ui.toast('Armor is full'); if (G.pack.count('plate') > 0) id = 'plate'; }
-    else { if (this.hp >= this.maxHp && !this.bleeding) return G.ui.toast('Health is full'); const miss = this.maxHp - this.hp; const order = miss > 50 ? ['medkit', 'stim', 'bandage'] : miss > 25 ? ['stim', 'bandage', 'medkit'] : ['bandage', 'stim', 'medkit']; id = order.find((k) => G.pack.count(k) > 0); }
-    if (!id) return G.ui.toast(kind === 'plate' ? 'No armor plates' : 'No medical supplies');
+    if (kind === 'plate') { if (!this.vestId) return G.ui.toast('No shield equipped'); if (this.armor >= this.maxArmor) return G.ui.toast('Shield is full'); if (G.pack.count('plate') > 0) id = 'plate'; }
+    else { if (this.hp >= this.maxHp && !this.bleeding) return G.ui.toast('Health is full'); const miss = this.maxHp - this.hp; const order = miss > 25 ? ['medkit', 'stim', 'bandage'] : miss > 12 ? ['stim', 'bandage', 'medkit'] : ['bandage', 'stim', 'medkit']; id = order.find((k) => G.pack.count(k) > 0); }
+    if (!id) return G.ui.toast(kind === 'plate' ? 'No shield cells' : 'No medical supplies');
     this.healItem = id; this.healT = 0; this.reloadT = -1; this.anim.stop(); audio.click(500, 0.08, 0.15, 'sine');
   }
   finishHeal() {
     const G = this.game, it = ITEMS[this.healItem]; G.pack.take(this.healItem, 1);
     if (this.healItem !== 'plate') this.bleeding = false;
-    if (this.healItem === 'plate') this.armor = Math.min(this.maxArmor, this.armor + 50); else { this.hp = Math.min(this.maxHp, this.hp + it.heal); if (it.stamina) { this.stimT = it.stamina; this.stamina = 100; } }
+    if (this.healItem === 'plate') { this.armor = Math.min(this.maxArmor, this.armor + this.maxArmor * 0.5); this.shield.userData.flash(0.8, 0x80ffd0); } else { this.hp = Math.min(this.maxHp, this.hp + it.heal); if (it.stamina) { this.stimT = it.stamina; this.stamina = 100; } }
     G.ui.toast(`${it.name} used`); this.healT = -1; audio.click(800, 0.08, 0.2, 'sine');
   }
   aimRay(cam) { const o = cam.getWorldPosition(new THREE.Vector3()); const d = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.getWorldQuaternion(new THREE.Quaternion())); return { o, d }; }

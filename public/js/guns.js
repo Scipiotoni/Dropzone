@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { TEX } from './textures.js';
+import { mergeRigid, collectRefs, hoistStatic } from './geom.js';
 import { WEAPONS, MODS, DEFAULT_MODS } from './items.js';
 
 let M = null;
@@ -683,7 +684,9 @@ export function buildGun(id, modsIn = {}) {
   const V = (a) => a ? new THREE.Vector3(...a) : null;
   const anchors = { grip, fore: fore || grip.clone().add(new THREE.Vector3(-0.025, -0.01, -0.01)), magwell: V(info.magPos)?.add(new THREE.Vector3(0, -0.06, 0)) || grip.clone(), charger: V(info.chargerPos), bolt: V(info.boltPos), cover: V(info.coverPos),
     port: new THREE.Vector3(0.01, -0.04, -0.02), slideTop: new THREE.Vector3(0, 0.03, 0.04), pump: info.pump ? new THREE.Vector3(info.pump[0], info.pump[1] - 0.02, info.pump[2]) : null, pouch: new THREE.Vector3(-0.12, -0.34, 0.24) };
-  return { group: root, muzzle, sight, reticle: sight.reticle, mag, magRest: mag?.position.clone(), pump, pumpRest: pump?.position.clone(), laser, light, grip, fore, id, mods, parts, anchors };
+  const out = { group: root, muzzle, sight, reticle: sight.reticle, mag, magRest: mag?.position.clone(), pump, pumpRest: pump?.position.clone(), laser, light, grip, fore, id, mods, parts, anchors };
+  const keep = collectRefs(out); hoistStatic(root, keep); mergeRigid(root, keep); // ~100 parts -> a handful of draw calls; animated parts stay separate
+  return out;
 }
 
 // Shell casing geometry / material for ejected brass

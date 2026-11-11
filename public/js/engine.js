@@ -13,7 +13,37 @@ THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\n varying float vFogDepth; v
 THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\n vFogDepth = - mvPosition.z; vFogY = cameraPosition.y + (transpose(mat3(viewMatrix)) * mvPosition.xyz).y;\n#endif';
 THREE.ShaderChunk.fog_pars_fragment = '#ifdef USE_FOG\n uniform vec3 fogColor; varying float vFogDepth; varying float vFogY;\n #ifdef FOG_EXP2\n uniform float fogDensity;\n #else\n uniform float fogNear; uniform float fogFar;\n #endif\n#endif';
 THREE.ShaderChunk.fog_fragment = '#ifdef USE_FOG\n #ifdef FOG_EXP2\n float hAtt = mix(1.0, 0.35, smoothstep(10.0, 90.0, vFogY));\n float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth * hAtt );\n #else\n float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );\n #endif\n gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );\n#endif';
-import { setAniso, POM } from './textures.js';
+import { setAniso, POM, guessQuality } from './textures.js';
+export { guessQuality };
+
+// Per-quality budgets. "low" and "medium" target integrated GPUs (old Chromebooks): no post stack on low, small
+// shadow maps around the player, short grass/prop draw distances, thicker fog hiding the cull distance.
+export const QUALITY = {
+  low:    { pr: 0.75, prMin: 0.5, shadow: 1024, shadowSpan: 32, shadowEvery: 2, post: false, bloom: false, gtao: false, msaa: 0, pom: 0, far: 420, fog: 1.55, lod: { static: 300, prop: 120, tree: 230, grass: 34, actor: 150, detail: 48 }, grass: 0.4, trees: 0.6, tex: 0.5 },
+  medium: { pr: 1.0, prMin: 0.6, shadow: 2048, shadowSpan: 48, shadowEvery: 1, post: true, bloom: true, gtao: false, msaa: 0, pom: 0, far: 650, fog: 1.25, lod: { static: 450, prop: 250, tree: 380, grass: 55, actor: 230, detail: 90 }, grass: 0.6, trees: 0.85, tex: 0.5 },
+  high:   { pr: 1.5, prMin: 0.8, shadow: 4096, shadowSpan: 70, shadowEvery: 1, post: true, bloom: true, gtao: true, msaa: 4, pom: 1, far: 1600, fog: 1, lod: { static: 900, prop: 420, tree: 700, grass: 95, actor: 380, detail: 150 }, grass: 1, trees: 1, tex: 1 },
+  ultra:  { pr: 2.0, prMin: 1.0, shadow: 4096, shadowSpan: 70, shadowEvery: 1, post: true, bloom: true, gtao: true, msaa: 4, pom: 1, far: 1600, fog: 1, lod: { static: 2000, prop: 600, tree: 1000, grass: 130, actor: 500, detail: 220 }, grass: 1, trees: 1, tex: 1 },
+};
+// Distance culling: static chunks, props, trees, grass cells and actors are hidden beyond the per-quality distance.
+export class Lod {
+  constructor() { this.items = []; this.t = 0; this._p = new THREE.Vector3(); }
+  clear() { this.items.length = 0; }
+  add(obj, kind, center = null, radius = 0) { obj.userData.lodItem = true; this.items.push({ obj, kind, c: center, r: radius }); }
+  scan(root) { // pick up batcher chunks / instanced cells tagged with userData.lod
+    root.updateMatrixWorld(true);
+    root.traverse((o) => { if (o.userData.lod && !o.userData.lodItem && o.geometry) { let bs; if (o.isInstancedMesh) { if (!o.boundingSphere) o.computeBoundingSphere(); bs = o.boundingSphere; } else { if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); bs = o.geometry.boundingSphere; } this.add(o, o.userData.lod, bs.center.clone().applyMatrix4(o.matrixWorld), bs.radius); } });
+  }
+  update(dt, cam, dist, force = false) {
+    this.t -= dt; if (this.t > 0 && !force) return; this.t = 0.2;
+    const cx = cam.x, cz = cam.z;
+    for (const it of this.items) {
+      const D = dist[it.kind] ?? 1e9; let x, z;
+      if (it.c) { x = it.c.x; z = it.c.z; } else { x = it.obj.position.x; z = it.obj.position.z; }
+      const dx = x - cx, dz = z - cz, lim = D + it.r;
+      it.obj.visible = dx * dx + dz * dz < lim * lim;
+    }
+  }
+}
 
 const GradeShader = {
   uniforms: { tDiffuse: { value: null }, time: { value: 0 }, vignette: { value: 0.32 }, hurt: { value: 0 }, sat: { value: 0.9 }, tint: { value: new THREE.Vector3(1.02, 1.0, 0.96) }, grain: { value: 0.035 } },
@@ -91,16 +121,33 @@ export class Engine {
     this.gtao.blendIntensity = 0.85; this.gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.4, thickness: 1.2, scale: 1.1, samples: 12 }); this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
     this.composer.addPass(this.renderPass); this.composer.addPass(this.gtao); this.composer.addPass(this.bloom); this.composer.addPass(new OutputPass()); this.composer.addPass(this.grade);
     addEventListener('resize', () => this.resize());
-    this.quality = 'high';
+    this.quality = 'high'; this.Q = QUALITY.high; this.lod = new Lod();
   }
   setQuality(q) {
-    this.quality = q; const r = this.renderer;
-    r.setPixelRatio(q === 'low' ? Math.min(devicePixelRatio, 0.85) : q === 'ultra' ? Math.min(devicePixelRatio, 2) : Math.min(devicePixelRatio, 1.5));
-    this.sunLight.shadow.mapSize.set(q === 'low' ? 2048 : 4096, q === 'low' ? 2048 : 4096); this.sunLight.shadow.radius = q === 'low' ? 1 : 2;
-    if (this.sunLight.shadow.map) { this.sunLight.shadow.map.dispose(); this.sunLight.shadow.map = null; }
-    this.bloom.enabled = q !== 'low'; this.gtao.enabled = q === 'ultra' || q === 'high'; POM.value = q === 'low' ? 0 : q === 'medium' ? 0.6 : 1;
-    for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) { rt.samples = q === 'low' ? 0 : 4; rt.dispose(); }
+    if (!QUALITY[q]) q = 'high';
+    this.quality = q; const Q = this.Q = QUALITY[q]; const r = this.renderer;
+    this.prCap = Math.min(devicePixelRatio, Q.pr); this.prNow = this.prCap; this.fpsAcc = 0; this.fpsN = 0; this.fpsT = 0;
+    r.setPixelRatio(this.prNow);
+    r.shadowMap.type = q === 'low' ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+    const sh = this.sunLight.shadow; sh.mapSize.set(Q.shadow, Q.shadow); sh.radius = q === 'low' ? 1 : 2;
+    Object.assign(sh.camera, { left: -Q.shadowSpan, right: Q.shadowSpan, top: Q.shadowSpan, bottom: -Q.shadowSpan }); sh.camera.updateProjectionMatrix();
+    if (sh.map) { sh.map.dispose(); sh.map = null; }
+    r.shadowMap.autoUpdate = true; this.shadowTick = 0;
+    this.bloom.enabled = Q.bloom; this.gtao.enabled = Q.gtao; POM.value = Q.pom; POM.low = q === 'low';
+    for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) { rt.samples = Q.msaa; rt.dispose(); }
+    this.camera.far = Q.far; this.camera.updateProjectionMatrix();
+    if (this.scene.fog && this.fogBase) this.scene.fog.density = this.fogBase * Q.fog;
     this.resize();
+    this.onQuality?.(q);
+  }
+  // dynamic resolution: keep the frame rate near 30+ by scaling the render resolution between prMin and the cap
+  adapt(dt) {
+    if (this.quality === 'high' || this.quality === 'ultra') return;
+    this.fpsAcc += dt; this.fpsN++; this.fpsT += dt; if (this.fpsT < 1.5) return;
+    const fps = this.fpsN / this.fpsAcc; this.fpsAcc = 0; this.fpsN = 0; this.fpsT = 0; this.fps = fps;
+    let pr = this.prNow;
+    if (fps < 29) pr = Math.max(this.Q.prMin, pr - (fps < 22 ? 0.12 : 0.06)); else if (fps > 45) pr = Math.min(this.prCap, pr + 0.05);
+    if (Math.abs(pr - this.prNow) > 0.001) { this.prNow = pr; this.renderer.setPixelRatio(pr); this.composer.setPixelRatio(pr); this.composer.setSize(innerWidth, innerHeight); }
   }
   resize() {
     this.camera.aspect = innerWidth / innerHeight; this.camera.updateProjectionMatrix();
@@ -120,7 +167,7 @@ export class Engine {
     this.envRT = this.pmrem.fromScene(envScene, 0.02);
     s.environment = this.envRT.texture; s.environmentIntensity = 0.55;
     s.background = null;
-    s.fog = new THREE.FogExp2(fog, fogDensity);
+    this.fogBase = fogDensity; s.fog = new THREE.FogExp2(fog, fogDensity * (this.Q?.fog || 1));
     this.sunLight.color.set(elevation < 12 ? 0xffc890 : 0xffe4c4);
     this.clouds.material.uniforms.tint.value.set(elevation < 12 ? 0xffc8a0 : 0xfff4ea);
     this.renderer.toneMappingExposure = exposure;
@@ -136,13 +183,19 @@ export class Engine {
     }
   }
   followSun(pos) { // keep the shadow frustum centred on the player, snapped to texels to avoid shimmering
-    const L = this.sunLight; const step = 140 / L.shadow.mapSize.x;
+    const L = this.sunLight; const step = (L.shadow.camera.right - L.shadow.camera.left) / L.shadow.mapSize.x;
     const cx = Math.round(pos.x / step) * step, cz = Math.round(pos.z / step) * step;
     L.target.position.set(cx, pos.y, cz); L.position.set(cx + this.sun.x * 200, pos.y + this.sun.y * 200, cz + this.sun.z * 200);
     L.target.updateMatrixWorld();
   }
   render(dt, t) {
+    this.adapt(dt);
+    this.lod.update(dt, this.camera.position, this.Q.lod);
+    // shadow map refreshed every Nth frame on low (the shadow pass is a second full scene draw)
+    const r = this.renderer;
+    if (this.Q.shadowEvery > 1) { r.shadowMap.autoUpdate = false; if (++this.shadowTick >= this.Q.shadowEvery) { this.shadowTick = 0; r.shadowMap.needsUpdate = true; } }
     this.grade.uniforms.time.value = t % 100; this.clouds.material.uniforms.time.value = t; this.clouds.position.copy(this.camera.position);
-    this.composer.render(dt);
+    if (this.Q.post) this.composer.render(dt);
+    else r.render(this.scene, this.camera); // low: straight to the canvas (tone mapping in the material shaders), no post passes
   }
 }

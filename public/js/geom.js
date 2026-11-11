@@ -36,11 +36,16 @@ export function normalizeGeo(g) {
 
 // ---------- static batcher
 export class Batcher {
-  constructor() { this.parts = new Map(); }
+  // parts are bucketed spatially (CELL_B metres) and per material, so every merged mesh has a tight bounding sphere:
+  // frustum culling and the distance LOD can then skip whole city blocks instead of drawing the entire map.
+  constructor(cell = 128) { this.parts = new Map(); this.cell = cell; }
   add(geo, mat, matrix) {
     const g = normalizeGeo(matrix ? geo.clone().applyMatrix4(matrix) : geo);
-    if (!this.parts.has(mat)) this.parts.set(mat, []);
-    this.parts.get(mat).push(g);
+    g.computeBoundingBox(); const c = g.boundingBox.getCenter(_p);
+    const key = Math.floor(c.x / this.cell) + ',' + Math.floor(c.z / this.cell);
+    let byMat = this.parts.get(mat); if (!byMat) this.parts.set(mat, byMat = new Map());
+    if (!byMat.has(key)) byMat.set(key, []);
+    byMat.get(key).push(g);
   }
   // place a geometry with a parent transform (pos, yaw) plus local transform
   put(geo, mat, parent, lx = 0, ly = 0, lz = 0, rx = 0, ry = 0, rz = 0) {
@@ -49,20 +54,86 @@ export class Batcher {
     this.add(g, mat);
   }
   build(group, { cast = true, receive = true } = {}) {
-    for (const [mat, list] of this.parts) {
-      // merge in chunks to keep index sizes sane
-      for (let i = 0; i < list.length; i += 400) {
-        const merged = mergeGeometries(list.slice(i, i + 400), false);
+    for (const [mat, cells] of this.parts) for (const list of cells.values()) {
+      for (let i = 0; i < list.length; i += 600) {
+        const merged = mergeGeometries(list.slice(i, i + 600), false);
         if (!merged) continue;
         merged.computeBoundingSphere();
         const mesh = new THREE.Mesh(merged, mat); mesh.castShadow = cast && !mat.userData.noShadow; mesh.receiveShadow = receive;
-        mesh.matrixAutoUpdate = false; mesh.updateMatrix();
+        mesh.matrixAutoUpdate = false; mesh.updateMatrix(); mesh.userData.lod = mat.userData.lodKind || 'static';
         group.add(mesh);
       }
       for (const g of list) g.dispose();
     }
     this.parts.clear();
   }
+}
+
+// split one map-wide InstancedMesh into per-cell InstancedMeshes (tagged for the distance LOD)
+export function splitInstances(im, kind, cell = 96) {
+  const out = new THREE.Group(); const cells = new Map(); const m = new THREE.Matrix4(), p = new THREE.Vector3();
+  for (let i = 0; i < im.count; i++) { im.getMatrixAt(i, m); p.setFromMatrixPosition(m); const k = Math.floor(p.x / cell) + ',' + Math.floor(p.z / cell); let c = cells.get(k); if (!c) cells.set(k, c = []); c.push(m.clone()); }
+  for (const list of cells.values()) {
+    const n = new THREE.InstancedMesh(im.geometry, im.material, list.length); list.forEach((mm, i) => n.setMatrixAt(i, mm));
+    n.castShadow = im.castShadow; n.receiveShadow = im.receiveShadow; n.computeBoundingSphere(); n.userData.lod = kind; out.add(n);
+  }
+  return out;
+}
+// every Object3D an owner object refers to (its own fields, arrays and plain objects one level down): these must
+// survive mergeRigid because code animates them or swaps their materials.
+export function collectRefs(owner, out = new Set(), depth = 0) {
+  if (!owner || depth > 2) return out;
+  for (const v of Object.values(owner)) {
+    if (!v || typeof v !== 'object') continue;
+    if (v.isObject3D) { out.add(v); if (depth < 2 && v.userData) collectRefs(v.userData, out, depth + 1); }
+    else if (Array.isArray(v) || Object.getPrototypeOf(v) === Object.prototype) collectRefs(v, out, depth + 1);
+  }
+  return out;
+}
+// Groups nobody references are static relative to their parent: bake their leaf meshes into the parent so that
+// mergeRigid can fold them together (a drone's four arms + nacelle shells become one mesh per material).
+export function hoistStatic(root, protect = new Set()) {
+  const depth = (o) => { let d = 0; while (o.parent) { d++; o = o.parent; } return d; };
+  const groups = []; root.traverse((o) => { if (o !== root && !o.isMesh && !o.isSprite && !o.isLight && !protect.has(o) && o.children.length) groups.push(o); });
+  groups.sort((a, b) => depth(b) - depth(a));
+  const m = new THREE.Matrix4();
+  for (const g of groups) {
+    const parent = g.parent; if (!parent) continue;
+    const sc = g.scale; if (Math.abs(sc.x - sc.y) > 1e-6 || Math.abs(sc.x - sc.z) > 1e-6) continue; // keep shear-free
+    g.updateMatrix();
+    for (const c of [...g.children]) {
+      if (!c.isMesh || protect.has(c) || c.children.length) continue;
+      c.updateMatrix(); m.multiplyMatrices(g.matrix, c.matrix); g.remove(c); m.decompose(c.position, c.quaternion, c.scale); parent.add(c);
+    }
+    if (!g.children.length) parent.remove(g);
+  }
+  return root;
+}
+// Merge every node's rigid leaf meshes (same parent, same material, not referenced from code) into one mesh per
+// material. Characters, guns, vehicles and machines drop from 100-180 draw calls to a few dozen.
+export function mergeRigid(root, protect = new Set()) {
+  const nodes = []; root.traverse((n) => nodes.push(n));
+  const m = new THREE.Matrix4();
+  for (const n of nodes) {
+    if (n.isMesh) continue;
+    const groups = new Map();
+    for (const c of n.children) {
+      if (!c.isMesh || c.isInstancedMesh || c.isSkinnedMesh || c.children.length || protect.has(c) || !c.visible || c.userData.keep || Array.isArray(c.material) || c.material.transparent) continue;
+      const k = c.material.uuid + (c.castShadow ? 's' : '') + (c.receiveShadow ? 'r' : '') + c.renderOrder;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(c);
+    }
+    for (const list of groups.values()) {
+      if (list.length < 2) continue;
+      const geos = list.map((c) => { c.updateMatrix(); m.copy(c.matrix); return normalizeGeo(c.geometry.clone().applyMatrix4(m)); });
+      const merged = mergeGeometries(geos, false); geos.forEach((g) => g.dispose()); if (!merged) continue;
+      merged.computeBoundingSphere();
+      const mesh = new THREE.Mesh(merged, list[0].material); mesh.castShadow = list[0].castShadow; mesh.receiveShadow = list[0].receiveShadow; mesh.renderOrder = list[0].renderOrder;
+      for (const c of list) n.remove(c);
+      n.add(mesh);
+    }
+  }
+  return root;
 }
 
 // ---------- collision world

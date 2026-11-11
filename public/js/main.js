@@ -2,6 +2,7 @@
 // adaptive AI, multiplayer sessions and extraction.
 import * as THREE from 'three';
 import { Engine } from './engine.js';
+import { QNAME } from './textures.js';
 import { Input, Player } from './player.js';
 import { UI } from './ui.js';
 import { Effects } from './effects.js';
@@ -15,7 +16,7 @@ import { Ballistics } from './ballistics.js';
 import { Vehicle, VEHICLES, ENTER_RANGE } from './vehicles.js';
 import { resetEnemyIds, TYPE_BY_CODE, SHOT_KINDS } from './enemies.js';
 import { LootContainer, Pack, rollLoot, entryName, CONTAINER_INFO } from './loot.js';
-import { Drone, Crawler, Strider, Sentinel, Raider } from './enemies.js';
+import { Drone, Crawler, Strider, Sentinel, Raider, Tick } from './enemies.js';
 import { gunSound } from './player.js';
 import { buildGun } from './guns.js';
 import { ITEMS, WEAPONS, MODS, PIECES, PIECE_ORDER, DEFAULT_MODS, entryKg } from './items.js';
@@ -49,8 +50,9 @@ class Game {
     this.scene = this.engine.scene; this.engine.attach();
     this.input = new Input(this.engine.renderer.domElement);
     this.ui = new UI(this);
-    this.settings = { sens: 1, vol: 0.7, quality: 'high', fov: 72, view: 'third', ...(store.get(SET_KEY) || {}) };
-    this.engine.baseFov = this.settings.fov; audio.setVolume(this.settings.vol); if (this.settings.quality !== 'high') this.engine.setQuality(this.settings.quality);
+    this.settings = { sens: 1, vol: 0.7, quality: QNAME, fov: 72, view: 'third', ...(store.get(SET_KEY) || {}) };
+    const qp = new URLSearchParams(location.search).get('q'); if (qp) this.settings.quality = qp;
+    this.engine.baseFov = this.settings.fov; audio.setVolume(this.settings.vol); this.engine.setQuality(this.settings.quality);
     this.mode = 'menu'; this.time = 0; this.enemies = []; this.rockets = []; this.raidLoot = []; this.shakeAmt = 0; this.vehicles = []; this.containers = []; this.myParked = new Set();
     this.ai = new Director(this); this.net = new Net(this); this.audio = audio; this.ballistics = new Ballistics(this); this.THREE = THREE;
     this.scene.add(this.engine.camera);
@@ -77,6 +79,10 @@ class Game {
     await step(100, 'Ready');
     // warm up shaders by rendering both levels once
     for (const w of [this.base, this.hot]) { w.root.visible = true; this.world = w; this.engine.camera.position.set(0, 20, 30); this.engine.camera.lookAt(0, 0, 0); this.engine.render(0.016, 0); w.root.visible = false; }
+    this.engine.lod.scan(this.base.root); this.engine.lod.scan(this.hot.root);
+    this.engine.onQuality = () => this.lightBudget(); this.lightBudget();
+    // the one headlight shared by whichever vehicle the local player drives at night
+    this.headlight = new THREE.SpotLight(0xfff2d8, 0, 50, 0.6, 0.5, 1.4); this.headlight.target.position.set(0, -1.2, 10); this.headlight.add(this.headlight.target); this.scene.add(this.headlight);
     this.ui.loading(null);
     this.showMenu();
     const q = new URLSearchParams(location.search);
@@ -155,6 +161,7 @@ class Game {
     else this.engine.setAtmosphere({ elevation: 9, azimuth: 250, fog: 0xc0a088, fogDensity: 0.004, exposure: 0.95, turbidity: 9 });
   }
   toBase() {
+    this.lightBudget?.();
     this.cleanupRaid(); this.mode = 'base'; this.setWorld(this.base, 'base'); this.ui.hideMenu(); this.ui.show(true);
     this.loadBaseForTeam(true); this.syncPlayerFromProfile();
     const P = this.player; P.hp = P.maxHp; P.spawn(this.base.spawn, this.base.spawnYaw); P.fp = this.settings.view === 'first'; P.op.root.visible = true; P.reattach(this.scene); P.vehicle = null; P.seat = null; P.hidden = false;
@@ -239,12 +246,14 @@ class Game {
     this.containers = []; resetEnemyIds(1);
     W.loot.forEach((l, i) => { const roll = r(); if (roll < 0.12) return; const c = new LootContainer(l.type, l.pos, l.yaw, seeded((seed + i * 7919) >>> 0)); c.cid = 'c' + i; W.root.add(c.mesh); this.containers.push(c); });
     this.enemies = []; const host = this.net.isHost; const D = this.ai.doctrine;
-    const mk = (type, p, tier) => { const E = { drone: Drone, crawler: Crawler, strider: Strider, sentinel: Sentinel, raider: Raider }[type]; p.y = W.col.groundAt(p.x, p.z, 999).y; const e = new E(this, p, tier, { rand: r }); e.puppet = !host; this.enemies.push(e); return e; };
+    const mk = (type, p, tier) => { const E = { drone: Drone, crawler: Crawler, strider: Strider, sentinel: Sentinel, raider: Raider, tick: Tick }[type]; p.y = W.col.groundAt(p.x, p.z, 999).y; const e = new E(this, p, tier, { rand: r }); e.puppet = !host; this.enemies.push(e); return e; };
     for (const s of W.spawns) {
       const roll = r(); if (s.type !== 'strider' && s.type !== 'sentinel' && roll < 0.15) continue;
       if (safe && s.type !== 'strider' && Math.hypot(s.pos.x - safe.x, s.pos.z - safe.z) < 55) continue;
       const type = s.type === 'raider' && r() < D.droneShare * 0.3 ? 'drone' : s.type;
       mk(type, s.pos.clone(), s.tier);
+      // machines travel with a brood of Ticks (kamikaze mines on legs)
+      if (type === 'crawler' || type === 'strider') for (let i = 0, n = type === 'strider' ? 3 : 1 + (r() < 0.4 ? 1 : 0); i < n; i++) mk('tick', s.pos.clone().add(new THREE.Vector3((r() - 0.5) * 10, 0, (r() - 0.5) * 10)), 0);
     }
     // doctrine-driven pressure (host only; clients receive these through snapshots)
     if (host) {
@@ -321,8 +330,10 @@ class Game {
     this.ai.onDeath(by);
     const lo = this.profile.loadout; lo.primary = lo.secondary = null; lo.vest = null; lo.armor = 0; lo.pack = 'pack1'; this.profile.backpack = [];
     if (!this.profile.stash.weapons.length) { this.profile.stash.weapons.push({ uid: this.nextUid(), id: 'p9', mods: {} }); this.stashAddItem('a9', 45); this.stashAddItem('bandage', 1); this.loaner = true; }
+    // with only 40 HP nobody should deploy without a shield: issue a spare Light Shield if the stash has none
+    if (!['vest1', 'vest2', 'vest3'].some((k) => this.stashCount(k) > 0)) { lo.vest = 'vest1'; lo.armor = ITEMS.vest1.armor; this.loaner = true; }
     store.set(SAVE_KEY, { ...this.profile, base: this.base.build.serialize() });
-    setTimeout(() => { this.input.unlock(); this.ui.show(false); this.ui.results({ ok: false, items: lost, time: RAID_TIME - this.raid.t, kills: this.raid.kills, looted: this.raid.looted }); if (this.loaner) { this.ui.toast('Quartermaster issued you a loaner Glock 17'); this.loaner = false; } }, 3500);
+    setTimeout(() => { this.input.unlock(); this.ui.show(false); this.ui.results({ ok: false, items: lost, time: RAID_TIME - this.raid.t, kills: this.raid.kills, looted: this.raid.looted }); if (this.loaner) { this.ui.toast('Quartermaster issued you spare kit'); this.loaner = false; } }, 3500);
   }
   extracted() {
     this.mode = 'extracted'; this.profile.stats.extracts++; const P = this.player; const lo = this.profile.loadout;
@@ -349,7 +360,7 @@ class Game {
     const now = this.time; const byId = new Map(this.enemies.map((e) => [e.id, e]));
     for (const a of list) {
       let e = byId.get(a[0]);
-      if (!e) { const type = TYPE_BY_CODE[a[1]]; const E = { drone: Drone, crawler: Crawler, strider: Strider, sentinel: Sentinel, raider: Raider }[type]; if (!E) continue; e = new E(this, new THREE.Vector3(a[2] / 10, a[3] / 10, a[4] / 10), a[9] || 0, { id: a[0] }); e.id = a[0]; e.puppet = true; this.enemies.push(e); byId.set(e.id, e); }
+      if (!e) { const type = TYPE_BY_CODE[a[1]]; const E = { drone: Drone, crawler: Crawler, strider: Strider, sentinel: Sentinel, raider: Raider, tick: Tick }[type]; if (!E) continue; e = new E(this, new THREE.Vector3(a[2] / 10, a[3] / 10, a[4] / 10), a[9] || 0, { id: a[0] }); e.id = a[0]; e.puppet = true; this.enemies.push(e); byId.set(e.id, e); }
       e.applyNet(a); e.seenNet = now;
     }
     for (let i = this.enemies.length - 1; i >= 0; i--) { const e = this.enemies[i]; if (e.puppet && e.alive && e.seenNet !== undefined && now - e.seenNet > 6 && e.pos.distanceTo(this.player.pos) < 300) { e.remove(); this.enemies.splice(i, 1); } }
@@ -499,6 +510,7 @@ class Game {
     this.fx.update(dt, this.scene.fog);
     if (this.world.terrain.grassTime) this.world.terrain.grassTime.value = this.time;
     this.engine.followSun(this.mode === 'heli' && this.heliRide ? this.heliRide.pos : P.pos);
+    if (this.headlight) { const hv = P.vehicle && P.seat === 0 && this.night ? P.vehicle : null; const anchor = hv?.model.userData.headAnchor; if (anchor && this.headlight.parent !== anchor) anchor.add(this.headlight); else if (!anchor && this.headlight.parent !== this.scene) this.scene.add(this.headlight); this.headlight.intensity = anchor ? 50 : 0; }
     ui.update(dt);
     if (!this.noRender) this.engine.render(dt, this.time);
     I.endFrame();
@@ -554,14 +566,21 @@ class Game {
     if (this.mode === 'raid') this.ui.setRaidInfo(this.zone.name, R.t, obj);
     // hostiles: host simulates, clients run puppets
     for (const e of this.enemies) {
+      e.bubble?.userData.tick(dt, this.time);
       if (e.puppet) { if (e.pos.distanceToSquared(P.pos) < 400 * 400) e.puppetUpdate(dt, this.time); continue; }
       e._t = this.pickTarget(e); const d2 = e.pos.distanceToSquared(e._t.pos);
-      if (d2 < 240 * 240 || e.state === 'attack' || e.type === 'strider') e.update(dt, this.time);
+      // far, calm hostiles think at a reduced rate (accumulated dt): saves the CPU on low-end machines
+      const busy = e.state === 'attack' || e.type === 'strider' || !e.alive;
+      if (d2 < 240 * 240 || busy) {
+        const every = busy || d2 < 70 * 70 ? 1 : d2 < 140 * 140 ? 2 : 4;
+        e._acc = (e._acc || 0) + dt; if (((e._tick = (e._tick || 0) + 1) % every) === 0) { e.update(Math.min(0.1, e._acc), this.time); e._acc = 0; }
+      }
     }
     // reinforcement waves keep long shared sessions alive (host only)
     if (this.net.isHost && this.mode === 'raid') { this.waveT -= dt; if (this.waveT <= 0) { this.waveT = 150 + Math.random() * 90; this.spawnWave(); } }
     for (const v of this.vehicles) { if (v.driverRemote && this.time - (v.driverSeen || 0) > 1.5) v.driverRemote = null; if (v.pos.distanceToSquared(P.pos) < 500 * 500) v.update(dt, P.vehicle === v && P.seat === 0 ? this.input : null); }
     const cp = this.engine.camera.position; for (const c of this.containers) c.update(this.time, cp);
+    this.cullActors(dt);
     for (let i = this.rockets.length - 1; i >= 0; i--) {
       const r = this.rockets[i]; r.t += dt; r.v.y -= 6 * dt; const step = r.v.clone().multiplyScalar(dt); const L = step.length();
       const h = this.hot.col.ray(r.mesh.position, step.clone().divideScalar(L), L); r.mesh.position.add(step); r.mesh.lookAt(r.mesh.position.clone().add(r.v));
@@ -569,12 +588,25 @@ class Game {
       if (h || P.pos.distanceTo(r.mesh.position) < 1.2 || r.t > 6) { const p = h ? h.point : r.mesh.position.clone(); this.scene.remove(r.mesh); this.rockets.splice(i, 1); this.explode(p, 7, 70, 'strider', r.visual); }
     }
   }
+  // every extra light is a loop iteration in every lit fragment: low keeps 3 base lights, medium 6
+  lightBudget() {
+    const cap = { low: 3, medium: 6 }[this.engine.quality] ?? 99; let n = 0;
+    for (const w of [this.base, this.hot]) w?.root.traverse((o) => { if (o.isPointLight || o.isSpotLight) { if (o.userData.budget === undefined) o.userData.budget = true; o.visible = n++ < cap; } });
+  }
+  // distance culling for dynamic actors (hostiles, vehicles, containers) using the quality's actor distance
+  cullActors(dt) {
+    this.cullT = (this.cullT || 0) - dt; if (this.cullT > 0) return; this.cullT = 0.2;
+    const cp = this.engine.camera.position, Q = this.engine.Q.lod, A = Q.actor * Q.actor, Pd = Q.prop * Q.prop, Dd = Q.detail * Q.detail;
+    for (const e of this.enemies) { const d = e.pos.distanceToSquared(cp); e.root.visible = d < (e.type === 'strider' ? A * 2.5 : A); }
+    for (const v of this.vehicles) v.model.visible = v.pos.distanceToSquared(cp) < Pd;
+    for (const c of this.containers) c.mesh.visible = c.pos.distanceToSquared(cp) < Dd * 1.5;
+  }
   spawnWave() {
     const players = [this.player, ...this.net.remotes.values()].filter((p) => !p.dead && !p.hidden); if (!players.length) return;
     const tgt = players[Math.floor(Math.random() * players.length)]; const a = Math.random() * 6.28, d = 110 + Math.random() * 60;
     const c = new THREE.Vector3(THREE.MathUtils.clamp(tgt.pos.x + Math.cos(a) * d, -PLAY + 15, PLAY - 15), 0, THREE.MathUtils.clamp(tgt.pos.z + Math.sin(a) * d, -PLAY + 15, PLAY - 15));
     const list = []; const n = 3 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < n; i++) { const p = c.clone().add(new THREE.Vector3((Math.random() - 0.5) * 16, 0, (Math.random() - 0.5) * 16)); p.y = this.hot.col.groundAt(p.x, p.z, 999).y; const E = Math.random() < 0.6 ? Raider : Math.random() < 0.5 ? Drone : Crawler; const e = new E(this, p, 1); e.state = 'search'; e.lastSeen = tgt.pos.clone(); this.enemies.push(e); list.push(e); }
+    for (let i = 0; i < n; i++) { const p = c.clone().add(new THREE.Vector3((Math.random() - 0.5) * 16, 0, (Math.random() - 0.5) * 16)); p.y = this.hot.col.groundAt(p.x, p.z, 999).y; const q = Math.random(); const E = q < 0.5 ? Raider : q < 0.72 ? Drone : q < 0.86 ? Crawler : Tick; const e = new E(this, p, 1); e.state = 'search'; e.lastSeen = tgt.pos.clone(); this.enemies.push(e); list.push(e); }
     this.ai.formSquads(list); this.ui.feed('Hostile reinforcements spotted');
   }
   updateBuild(dt) {

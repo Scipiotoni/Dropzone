@@ -66,6 +66,7 @@ function dataTex(data, size, srgb) {
 }
 /** sample(u,v) -> {h, c:[r,g,b], r(rough), m(metal)?, a(alpha)?}  */
 export function bake(size, sample, normalStrength = 2) {
+  size = Math.max(128, Math.round(size * TEXQ));
   const n = size * size;
   const H = new Float32Array(n), col = new Uint8Array(n * 4), rough = new Uint8Array(n * 4), nor = new Uint8Array(n * 4);
   let hasAlpha = false;
@@ -245,6 +246,17 @@ export function pbr(name, opts = {}) {
 // ---------- parallax occlusion mapping (height in normal-map alpha). Screen-space tangent frame, so it works on any
 // mesh with sensible UVs. Global strength is driven by the graphics quality (0 disables it).
 export const POM = { value: 1 };
+// first-run guess: Chromebooks / low core counts / low memory start on "low"
+export function guessQuality() {
+  const ua = navigator.userAgent || ''; const cores = navigator.hardwareConcurrency || 4; const mem = navigator.deviceMemory || 8;
+  if (/CrOS/.test(ua) || cores <= 4 || mem <= 4) return 'low';
+  if (cores <= 6 || /Mobile|Android/.test(ua)) return 'medium';
+  return 'high';
+}
+// texture bake resolution follows the saved graphics quality (halved on low/medium: faster load, less VRAM)
+function savedQuality() { try { return JSON.parse(localStorage.getItem('dropzone.settings.v1') || '{}').quality || guessQuality(); } catch { return guessQuality(); } }
+export const QNAME = savedQuality();
+export const TEXQ = /^(low|medium)$/.test(savedQuality()) ? 0.5 : 1;
 const POM_DEPTH = { brick: 0.05, concrete: 0.018, rock: 0.06, asphalt: 0.015, woodPlank: 0.02, tile: 0.02, metalPlate: 0.012, corrugated: 0.03, sandbag: 0.03, bark: 0.05, dirt: 0.03, rust: 0.012 };
 const POM_GLSL = `
   vec2 pUv = vMapUv;

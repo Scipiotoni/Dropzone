@@ -1,7 +1,7 @@
 // Detailed world architecture & props: ruined apartment blocks, warehouses, houses, gas station, shipping containers,
 // wrecked cars, radio tower, machine wreck, barriers... All static parts are batched per material; colliders are boxes.
 import * as THREE from 'three';
-import { boxGeo, cylGeo, scaleUV } from './geom.js';
+import { boxGeo, cylGeo, scaleUV, splitInstances } from './geom.js';
 import { pbr, TEX } from './textures.js';
 
 let MAT = null;
@@ -457,7 +457,7 @@ export function makeTrees(W, spots, rand) {
       if (!v[key].length) continue;
       const im = new THREE.InstancedMesh(mergeG(v[key]), mat, list.length);
       list.forEach((sp, k) => { const s = 0.8 + rand() * 0.5; m4.compose(new THREE.Vector3(sp.x, sp.y - 0.2, sp.z), q.setFromAxisAngle(up, rand() * 6.28), new THREE.Vector3(s, s, s)); im.setMatrixAt(k, m4); });
-      im.castShadow = true; im.receiveShadow = true; out.add(im);
+      im.castShadow = true; im.receiveShadow = true; out.add(splitInstances(im, 'tree', 160));
     }
     for (const sp of list) W.col.box(sp.x, sp.z, 0.5, 0.5, sp.y - 1, sp.y + 8, 0, 'wood');
   });
@@ -474,6 +474,6 @@ export function makeRocks(W, spots, rand) {
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
   groups.forEach((list, i) => { if (!list.length) return; const im = new THREE.InstancedMesh(geos[i], M.rock, list.length);
     list.forEach((sp, k) => { const s = sp.s ?? (0.6 + rand() * 2.2); m4.compose(new THREE.Vector3(sp.x, sp.y + s * 0.15, sp.z), q.setFromEuler(e.set(rand() * 0.3, rand() * 6, rand() * 0.3)), new THREE.Vector3(s, s, s)); im.setMatrixAt(k, m4); if (s > 0.9) W.col.box(sp.x, sp.z, s * 2.2, s * 1.7, sp.y - 1, sp.y + s * 0.85, 0, 'concrete'); });
-    im.castShadow = true; im.receiveShadow = true; out.add(im); });
+    im.castShadow = true; im.receiveShadow = true; out.add(splitInstances(im, 'tree', 160)); });
   return out;
 }

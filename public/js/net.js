@@ -156,7 +156,7 @@ export class Net {
     const P = G.player; const w = P.weapon;
     const flags = (P.crouch ? 1 : 0) | (P.aimT > 0.4 ? 2 : 0) | (P.sprinting ? 4 : 0) | (P.dead ? 8 : 0) | (!P.onGround ? 16 : 0) | (P.vehicle ? 32 : 0) | (G.heliRide ? 64 : 0) | (P.reloadT >= 0 ? 128 : 0);
     const patch = { n: this.name, c: this.color, t: this.team, j: this.raidJoinedAt, sd: this.session?.seed, st: this.session?.start,
-      p: [Math.round(P.pos.x * 100), Math.round(P.pos.y * 100), Math.round(P.pos.z * 100), Math.round(P.yaw * 100), Math.round(P.pitch * 100), flags, Math.round(Math.hypot(P.vel.x, P.vel.z) * 10), Math.round(P.hp), P.vehicle ? P.vehicle.id : 0, P.seat ?? -1],
+      p: [Math.round(P.pos.x * 100), Math.round(P.pos.y * 100), Math.round(P.pos.z * 100), Math.round(P.yaw * 100), Math.round(P.pitch * 100), flags, Math.round(Math.hypot(P.vel.x, P.vel.z) * 10), Math.round(P.hp), P.vehicle ? P.vehicle.id : 0, P.seat ?? -1, Math.round(P.armor || 0)],
       w: w ? [w.id, w.mods.optic, w.mods.muzzle, w.mods.underbarrel, w.mods.magazine, w.mods.stock, w.mods.tactical] : null,
       ev: this.events, ds: G.ai.summary(),
       h: G.heliRide ? [Math.round(G.heliRide.pos.x * 10), Math.round(G.heliRide.pos.y * 10), Math.round(G.heliRide.pos.z * 10), +G.heliRide.yaw.toFixed(2), +G.heliRide.pitch.toFixed(2), +G.heliRide.roll.toFixed(2)] : null,
@@ -174,10 +174,10 @@ export class RemotePlayer {
     this.anim = new WeaponAnimator(); this.gun = null; this.wkey = ''; this.crouch = false; this.hidden = false; this.first = true;
     this.hitboxes = [{ obj: this.op.head, r: 0.15, mult: 2.4, tag: 'head', off: new THREE.Vector3(0, 0.12, 0) }, { obj: this.op.chest, r: 0.27, mult: 1, tag: 'torso', off: new THREE.Vector3(0, 0.1, 0) }, { obj: this.op.hips, r: 0.24, mult: 0.85, tag: 'legs', off: new THREE.Vector3(0, -0.25, 0) }];
     this.tag = makeTag(); this.op.root.add(this.tag); this.tag.position.y = 2.25;
-    this.reloadT = -1; this.hp = 100;
+    this.reloadT = -1; this.hp = 40; this.shield = 0;
   }
   apply(pr) {
-    const p = pr.p; this.netPos.set(p[0] / 100, p[1] / 100, p[2] / 100); this.netYaw = p[3] / 100; this.pitch = p[4] / 100; this.flags = p[5]; this.speed = p[6] / 10; this.hp = p[7]; this.vid = p[8]; this.seatIdx = p[9];
+    const p = pr.p; this.netPos.set(p[0] / 100, p[1] / 100, p[2] / 100); this.netYaw = p[3] / 100; this.pitch = p[4] / 100; this.flags = p[5]; this.speed = p[6] / 10; this.hp = p[7]; this.vid = p[8]; this.seatIdx = p[9]; this.shield = p[10] || 0;
     this.crouch = !!(this.flags & 1); this.dead = !!(this.flags & 8); this.alive = !this.dead; this.hidden = !!(this.flags & 64); this.inVehicle = !!(this.flags & 32); this.reloadT = this.flags & 128 ? 0.5 : -1;
     const mate = pr.t && pr.t === this.game.net.team; if ((pr.n && pr.n !== this.name) || mate !== this.mate) { this.name = pr.n || this.name; this.mate = mate; drawTag(this.tag, (mate ? '◆ ' : '') + this.name, mate ? '#6fdf5a' : pr.c); }
     const wk = JSON.stringify(pr.w); if (wk !== this.wkey) { this.wkey = wk; if (this.gun) this.op.attachGun(null); this.gun = null; if (pr.w && WEAPONS[pr.w[0]]) { const [id, optic, muzzle, underbarrel, magazine, stock, tactical] = pr.w; this.gun = buildGun(id, { optic, muzzle, underbarrel, magazine, stock, tactical }); this.op.attachGun(this.gun); this.ws = WEAPONS[id]; } }
@@ -203,7 +203,7 @@ export class RemotePlayer {
     return best;
   }
   // a local shot (or a host-simulated hostile) hit this remote player: tell their client
-  damage(n, hit, from, byMe) { if (this.dead) return; this.flinch = true; this.game.fx.impact(hit?.point || this.pos.clone().setY(this.pos.y + 1.2), null, 'flesh'); const f = from || this.pos; this.game.net.event('pd', [this.peer, Math.round(n), Math.round(f.x), Math.round(f.y), Math.round(f.z), byMe ? 1 : 0]); }
+  damage(n, hit, from, byMe) { if (this.dead) return; this.flinch = true; this.game.fx.impact(hit?.point || this.pos.clone().setY(this.pos.y + 1.2), null, this.shield > 0 ? 'shield' : 'flesh'); const f = from || this.pos; this.game.net.event('pd', [this.peer, Math.round(n), Math.round(f.x), Math.round(f.y), Math.round(f.z), byMe ? 1 : 0]); }
   get state() { return 'idle'; }
   dispose() { this.game.scene.remove(this.op.root); if (this.heli) this.game.scene.remove(this.heli); }
 }
